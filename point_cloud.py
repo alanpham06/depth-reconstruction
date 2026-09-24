@@ -43,7 +43,7 @@ def sphere_point_cloud(
 		x = sin_phi * torch.cos(theta_grid)
 		y = sin_phi * torch.sin(theta_grid)
 		z = torch.cos(phi_grid)
-		
+
 		body = torch.stack((x, y, z), dim=-1).reshape(-1, 3)
 		unit = torch.cat([north, body, south], dim=0)
 
@@ -105,7 +105,9 @@ def cube_sdf(points: torch.Tensor, half_extent: float = 1.0) -> torch.Tensor:
 
 def build_sphere() -> dict[str, torch.Tensor]:
 	"""Create reproducible sphere surface data."""
-	points, normals = sphere_point_cloud()
+
+	# Incresed resolution of sphere point cloud: n_lat=130, n_lon=512
+	points, normals = sphere_point_cloud(n_lat=34, n_lon=128, radius=1.0)
 	return {
 		"points": points,
 		"normals": normals,
@@ -115,7 +117,7 @@ def build_sphere() -> dict[str, torch.Tensor]:
 
 def build_cube() -> dict[str, torch.Tensor]:
 	"""Create reproducible cube surface data."""
-	points, normals = cube_point_cloud()
+	points, normals = cube_point_cloud(n_side=27, half_extent=1.0)
 	return {
 		"points": points,
 		"normals": normals,

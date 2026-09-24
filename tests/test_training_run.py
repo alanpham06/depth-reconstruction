@@ -5,6 +5,7 @@ would otherwise make by opening TensorBoard and the run directory.
 """
 
 import json
+import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -195,3 +196,22 @@ def test_eval_without_panels_writes_only_the_numbers(run):
     output = run.root / "eval_no_panels"
     _evaluate(run, output, "--num-panels", "0")
     assert sorted(p.name for p in output.iterdir()) == ["metrics.json"]
+
+
+def test_eval_refuses_two_captures_with_the_same_name(run, tmp_path):
+    val_copy = tmp_path / "val_copy"
+    shutil.copytree(run.val, val_copy)
+    output = tmp_path / "eval_duplicate"
+    with pytest.raises(SystemExit, match="cube"):
+        eval_cli.main(
+            [
+                "--checkpoint",
+                str(run.checkpoints / "tiny_version_0_best.ckpt"),
+                "--val",
+                str(run.val),
+                str(val_copy),
+                "--output",
+                str(output),
+            ]
+        )
+    assert not (output / "metrics.json").exists()

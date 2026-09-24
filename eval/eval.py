@@ -75,6 +75,13 @@ def main(argv=None):
     device = torch.device(args.device)
     network = load_network(args.checkpoint, device)
     files = capture_files(args.val)
+    names = [file.name.removesuffix(CAPTURE_SUFFIX) for file in files]
+    duplicates = sorted(name for name in set(names) if names.count(name) > 1)
+    if duplicates:
+        raise SystemExit(
+            f"--val names two captures called {', '.join(duplicates)}; "
+            "score each directory on its own"
+        )
     output = args.output or default_output(
         "eval", args.checkpoint, source_label(args.val)
     )

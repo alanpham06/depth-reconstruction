@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 
-from datasets.sparse_depth import SparseDepthDataset, load_views
+from datasets.sparse_depth import SparseDepthDataset, build_datasets
 from models.baselines import evaluate_baselines
 from models.losses import completion_loss
 from models.unet import UNet
@@ -89,25 +89,6 @@ def parse_args() -> argparse.Namespace:
         "--device", default="cuda" if torch.cuda.is_available() else "cpu"
     )
     return parser.parse_args()
-
-
-def build_datasets(
-    args: argparse.Namespace,
-) -> tuple[SparseDepthDataset, SparseDepthDataset]:
-    augment = dict(keep_range=tuple(args.keep_range), noise_std=args.noise_std)
-    if args.val:
-        return (
-            SparseDepthDataset(args.train, augment=True, **augment),
-            SparseDepthDataset(args.val),
-        )
-    n_views = load_views(args.train)["depth"].shape[0]
-    held_out = torch.arange(n_views) % args.val_every == 0
-    return (
-        SparseDepthDataset(
-            args.train, views=(~held_out).nonzero().squeeze(1), augment=True, **augment
-        ),
-        SparseDepthDataset(args.train, views=held_out.nonzero().squeeze(1)),
-    )
 
 
 def predict(model: UNet, batch: dict[str, torch.Tensor], amp: bool) -> torch.Tensor:
@@ -210,7 +191,9 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     args.amp = args.amp and args.device.startswith("cuda")
 
-    train_set, val_set = build_datasets(args)
+    train_set, val_set = build_datasets(
+        args.train, args.val, args.val_every, args.keep_range, args.noise_std
+    )
     loader_options = dict(
         num_workers=args.workers, pin_memory=args.device.startswith("cuda")
     )

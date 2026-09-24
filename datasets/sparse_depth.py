@@ -20,6 +20,8 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 
+from utils.paths import CAPTURE_GLOB
+
 
 def assemble_input(
     sparse_depth: torch.Tensor, sparse_mask: torch.Tensor
@@ -110,3 +112,61 @@ class SparseDepthDataset(Dataset):
             "valid": valid.unsqueeze(0),
             "ref": ref,
         }
+
+
+def capture_files(paths) -> list[Path]:
+    """Every capture file a list of --train or --val arguments names.
+
+    A file is taken as given, and a directory as every *_gt.pt in it, in name
+    order. A path that does not exist, or a directory holding no captures, is an
+    error here rather than an empty split later: an empty validation split would
+    leave best.ckpt nothing to be chosen on.
+    """
+    files = []
+    for path in map(Path, paths):
+        if path.is_dir():
+            found = sorted(path.glob(CAPTURE_GLOB))
+            if not found:
+                raise FileNotFoundError(f"{path} holds no {CAPTURE_GLOB} captures")
+            files.extend(found)
+        elif path.is_file():
+            files.append(path)
+        else:
+            raise FileNotFoundError(f"{path} does not exist")
+    return files
+
+
+def build_datasets(
+    train, val, val_every: int, keep_range, noise_std: float
+) -> tuple[SparseDepthDataset, SparseDepthDataset]:
+    """The augmented training split and the validation split.
+
+    With val, they come from different captures. Without it, every val_every-th
+    view of the training captures is held out.
+    """
+    augment = dict(keep_range=tuple(keep_range), noise_std=noise_std)
+    train = capture_files(train)
+    if val:
+        return (
+            SparseDepthDataset(train, augment=True, **augment),
+            SparseDepthDataset(capture_files(val)),
+        )
+    n_views = load_views(train)["depth"].shape[0]
+    held_out = torch.arange(n_views) % val_every == 0
+    return (
+        SparseDepthDataset(
+            train, views=(~held_out).nonzero().squeeze(1), augment=True, **augment
+        ),
+        SparseDepthDataset(train, views=held_out.nonzero().squeeze(1)),
+    )
+
+
+def evenly_spaced_batch(dataset, n: int) -> dict[str, torch.Tensor]:
+    """n views spread evenly over a split, first and last included, as one batch.
+
+    The rows of a sample panel, picked the way save_preview picked them on main.
+    """
+    count = min(n, len(dataset))
+    indices = torch.linspace(0, len(dataset) - 1, count).round().long().tolist()
+    items = [dataset[i] for i in indices]
+    return {key: torch.stack([item[key] for item in items]) for key in items[0]}

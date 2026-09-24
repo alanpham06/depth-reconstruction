@@ -28,7 +28,7 @@ import torch
 from render.geometry import PRIMITIVES
 from render.raycast import mesh_intersector, orbit_cameras, render
 from render.sampling import sample_surface, sparse_depth_map
-from utils.paths import DATA
+from utils.paths import CAPTURE_SUFFIX, DATA
 
 
 def parse_args() -> argparse.Namespace:
@@ -149,7 +149,7 @@ def main() -> None:
             "sparse_depth": torch.stack([depth for depth, _ in sparse]).float(),
             "sparse_mask": torch.stack([mask for _, mask in sparse]),
         }
-        torch.save(data, args.out / f"{name}_gt.pt")
+        torch.save(data, args.out / f"{name}{CAPTURE_SUFFIX}")
         save_preview(name, data, args.out / f"{name}_gt.png")
         coverage = data["mask"].float().mean().item()
         sparsity = data["sparse_mask"].float().mean().item()
@@ -157,7 +157,7 @@ def main() -> None:
         print(
             f"{name}: verts={mesh.vertices.shape[0]} faces={mesh.faces.shape[0]} "
             f"depth={tuple(data['depth'].shape)} coverage={coverage:.1%} "
-            f"sparse={sparsity:.2%} of image, {on_object:.1%} of object -> {args.out / f'{name}_gt.pt'}"
+            f"sparse={sparsity:.2%} of image, {on_object:.1%} of object -> {args.out / f'{name}{CAPTURE_SUFFIX}'}"
         )
 
 

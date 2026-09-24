@@ -20,3 +20,7 @@ REPO = Path(__file__).resolve().parent.parent
 DATA = REPO / "data"
 # Relative: a tool's output lands under the directory it was run from
 OUTPUT = Path("output")
+
+# What render.capture names a primitive's file, and what --train/--val look for
+CAPTURE_SUFFIX = "_gt.pt"
+CAPTURE_GLOB = f"*{CAPTURE_SUFFIX}"

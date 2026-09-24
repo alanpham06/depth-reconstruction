@@ -13,6 +13,9 @@ batch it arrived in.
 
 import torch
 
+# The names summarize_metrics returns, in its order: the val/ tags and eval's columns
+METRICS = ("mae", "rmse", "abs_rel", "delta1", "hole_mae")
+
 
 @torch.no_grad()
 def depth_metrics(
@@ -50,3 +53,24 @@ def summarize_metrics(sums: dict[str, torch.Tensor]) -> dict[str, float]:
         "delta1": (sums["delta1"] / n).item(),
         "hole_mae": (sums["hole_abs"] / hole_n).item(),
     }
+
+
+class PooledMetrics:
+    """depth_metrics sums for several predictors over one split, divided once at the end."""
+
+    def __init__(self) -> None:
+        self.sums: dict[str, dict[str, torch.Tensor]] = {}
+
+    def add(self, name: str, pred, gt, valid, sparse_mask) -> None:
+        sums = self.sums.setdefault(name, {})
+        for key, value in depth_metrics(pred, gt, valid, sparse_mask).items():
+            sums[key] = sums.get(key, 0) + value
+
+    def summarize(self, reduce=None) -> dict[str, dict[str, float]]:
+        """Metrics per predictor. `reduce`, if given, sums each total across processes."""
+        results = {}
+        for name, sums in self.sums.items():
+            if reduce is not None:
+                sums = {key: reduce(value) for key, value in sums.items()}
+            results[name] = summarize_metrics(sums)
+        return results

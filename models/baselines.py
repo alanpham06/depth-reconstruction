@@ -23,7 +23,11 @@ def nearest_fill(
 ) -> torch.Tensor:
     """Copy the nearest sparse pixel's depth into every pixel."""
     batch, _, height, width = inputs.shape
-    v, u = torch.meshgrid(torch.arange(height), torch.arange(width), indexing="ij")
+    v, u = torch.meshgrid(
+        torch.arange(height, device=inputs.device),
+        torch.arange(width, device=inputs.device),
+        indexing="ij",
+    )
     pixels = torch.stack([v, u], dim=-1).reshape(-1, 2).float()
     out = constant_fill(inputs, ref)
     for b in range(batch):
@@ -32,8 +36,16 @@ def nearest_fill(
             continue
         depth = (inputs[b, 0] + ref[b, 0]).reshape(-1)[mask]
         seeds = pixels[mask]
+        # Direct distances, not cdist's matmul shortcut: the shortcut multiplies the
+        # squared norms, which TF32 would round, and pixel distances are exact
+        # without it on any device
         nearest = torch.cat(
-            [torch.cdist(block, seeds).argmin(dim=1) for block in pixels.split(chunk)]
+            [
+                torch.cdist(
+                    block, seeds, compute_mode="donot_use_mm_for_euclid_dist"
+                ).argmin(dim=1)
+                for block in pixels.split(chunk)
+            ]
         )
         out[b, 0] = depth[nearest].reshape(height, width)
     return out

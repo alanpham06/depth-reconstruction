@@ -1,4 +1,4 @@
-# Shared Python style across the five rendering repositories.
+# Ruff settings: the Python style this repository is formatted and linted with.
 line-length = 88
 indent-width = 4
 target-version = "py311"

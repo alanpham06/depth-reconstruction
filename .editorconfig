@@ -1,4 +1,4 @@
-# Shared editing conventions across the five rendering repositories.
+# Editing conventions for this repository.
 # ruff.toml defines the matching Python formatter and lint rules.
 root = true
 

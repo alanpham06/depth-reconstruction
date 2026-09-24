@@ -1,0 +1,19 @@
+name: dr
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.11.0+cu128
+      - torchvision==0.26.0+cu128
+      - lightning==2.6.5
+      - numpy==2.2.6
+      - Pillow==11.3.0
+      - matplotlib==3.11.2
+      - plotly==7.1.0
+      - PyYAML==6.0.3
+      - pytest==9.1.1
+      - ruff==0.16.8
+      - tensorboard==2.21.0

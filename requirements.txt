@@ -1,5 +1,0 @@
-torch>=2.2
-numpy
-matplotlib
-pytest
-plotly

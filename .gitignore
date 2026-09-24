@@ -1,6 +1,9 @@
+data
+output/
+runs/
+checkpoints/
+logs/
 __pycache__/
 *.py[cod]
-runs/
-logs/
-data/train/
-data/val/
+.pytest_cache/
+*.pte

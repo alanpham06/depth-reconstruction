@@ -1,0 +1,12 @@
+# Shared Python style across the five rendering repositories.
+line-length = 88
+indent-width = 4
+target-version = "py311"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

@@ -1,4 +1,4 @@
-"""Depth completion losses and evaluation metrics.
+"""Depth completion losses.
 
 All terms are restricted to `valid` pixels (rays that hit the surface): the
 background has no depth, so it is neither supervised nor scored.
@@ -73,41 +73,3 @@ def completion_loss(
     grad = gradient_loss(pred, gt, valid)
     total = l1 + grad_weight * grad
     return total, {"loss": total.item(), "l1": l1.item(), "grad": grad.item()}
-
-
-@torch.no_grad()
-def depth_metrics(
-    pred: torch.Tensor, gt: torch.Tensor, valid: torch.Tensor, sparse_mask: torch.Tensor
-) -> dict[str, torch.Tensor]:
-    """Per-batch sums (not means) so they can be accumulated over a whole split.
-
-    `hole_*` counts only valid pixels that had no sparse input, i.e. the pixels
-    the network actually had to fill in.
-    """
-    valid = valid.bool()
-    holes = valid & ~sparse_mask.bool()
-    err = (pred - gt).abs()
-    gt_safe = gt.clamp(min=1e-6)
-    ratio = torch.maximum(
-        pred.clamp(min=1e-6) / gt_safe, gt_safe / pred.clamp(min=1e-6)
-    )
-    return {
-        "n": valid.sum().double(),
-        "abs": err[valid].double().sum(),
-        "sq": err[valid].double().square().sum(),
-        "rel": (err / gt_safe)[valid].double().sum(),
-        "delta1": (ratio[valid] < 1.25).double().sum(),
-        "hole_n": holes.sum().double(),
-        "hole_abs": err[holes].double().sum(),
-    }
-
-
-def summarize_metrics(sums: dict[str, torch.Tensor]) -> dict[str, float]:
-    n, hole_n = sums["n"].clamp(min=1), sums["hole_n"].clamp(min=1)
-    return {
-        "mae": (sums["abs"] / n).item(),
-        "rmse": (sums["sq"] / n).sqrt().item(),
-        "abs_rel": (sums["rel"] / n).item(),
-        "delta1": (sums["delta1"] / n).item(),
-        "hole_mae": (sums["hole_abs"] / hole_n).item(),
-    }

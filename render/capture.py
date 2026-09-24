@@ -25,9 +25,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 
-from geometry import PRIMITIVES
-from render import mesh_intersector, orbit_cameras, render
-from sampling import sample_surface, sparse_depth_map
+from render.geometry import PRIMITIVES
+from render.raycast import mesh_intersector, orbit_cameras, render
+from render.sampling import sample_surface, sparse_depth_map
+from utils.paths import DATA
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,9 +68,7 @@ def parse_args() -> argparse.Namespace:
         "--band", type=float, default=0.03, help="width scale of the edge/corner bands"
     )
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument(
-        "--out", type=Path, default=Path(__file__).resolve().parent / "data"
-    )
+    parser.add_argument("--out", type=Path, default=DATA)
     return parser.parse_args()
 
 

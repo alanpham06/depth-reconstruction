@@ -2,16 +2,11 @@
 
 import torch
 
-from baselines import constant_fill, nearest_fill
-from dataset import assemble_input
-from losses import (
-    completion_loss,
-    depth_l1,
-    depth_metrics,
-    gradient_loss,
-    summarize_metrics,
-)
-from unet import UNet
+from datasets.sparse_depth import assemble_input
+from models.baselines import constant_fill, nearest_fill
+from models.losses import completion_loss, depth_l1, gradient_loss
+from models.unet import UNet
+from utils.metrics import depth_metrics, summarize_metrics
 
 
 def _plane(

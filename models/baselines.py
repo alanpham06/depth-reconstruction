@@ -10,7 +10,7 @@ so they are scored with exactly the same metrics.
 
 import torch
 
-from losses import depth_metrics, summarize_metrics
+from utils.metrics import depth_metrics, summarize_metrics
 
 
 def constant_fill(inputs: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:

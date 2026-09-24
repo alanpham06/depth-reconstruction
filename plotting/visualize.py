@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import torch
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 
+from utils.paths import DATA, OUTPUT
+
 
 def _scatter_cloud(
     ax: Axes3D, points: torch.Tensor, normals: torch.Tensor, title: str
@@ -43,14 +45,14 @@ def plot_shapes(shapes: dict[str, dict[str, torch.Tensor]]) -> plt.Figure:
 
 
 def main() -> None:
-    here = Path(__file__).resolve().parent
     shapes = {
-        "sphere": load_shape(here / "sphere.pt"),
-        "cube": load_shape(here / "cube.pt"),
+        "sphere": load_shape(DATA / "sphere.pt"),
+        "cube": load_shape(DATA / "cube.pt"),
     }
     figure = plot_shapes(shapes)
 
-    image_path = Path(__file__).with_name("point_clouds.png")
+    image_path = OUTPUT / "plotting" / "point_clouds.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(image_path, dpi=150, bbox_inches="tight")
     print(f"saved: {image_path}")
     if plt.get_backend().lower() == "agg":

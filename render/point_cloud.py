@@ -9,6 +9,8 @@ from pathlib import Path
 
 import torch
 
+from utils.paths import DATA
+
 
 def sphere_point_cloud(
     n_lat: int = 34,
@@ -136,9 +138,9 @@ def _save_shape(name: str, data: dict[str, torch.Tensor], output_path: Path) -> 
 
 
 def main() -> None:
-    here = Path(__file__).resolve().parent
-    _save_shape("sphere", build_sphere(), here / "sphere.pt")
-    _save_shape("cube", build_cube(), here / "cube.pt")
+    DATA.mkdir(parents=True, exist_ok=True)
+    _save_shape("sphere", build_sphere(), DATA / "sphere.pt")
+    _save_shape("cube", build_cube(), DATA / "cube.pt")
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import torch
 
-from point_cloud import sphere_point_cloud
+from render.point_cloud import sphere_point_cloud
 
 
 @dataclass

@@ -22,8 +22,8 @@ from dataclasses import dataclass
 
 import torch
 
-from geometry import Mesh
-from render import Camera, Intersector
+from render.geometry import Mesh
+from render.raycast import Camera, Intersector
 
 
 @dataclass

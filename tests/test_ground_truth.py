@@ -1,14 +1,14 @@
 """Checks that the procedural meshes and ground-truth renders meet spec.
 
-Run with `python test_ground_truth.py` (or pytest, if installed).
+Run with python -m pytest tests/test_ground_truth.py, or python -m tests.test_ground_truth.
 """
 
 import math
 
 import torch
 
-from geometry import Mesh, cube_mesh, icosphere_mesh, uv_sphere_mesh
-from render import (
+from render.geometry import Mesh, cube_mesh, icosphere_mesh, uv_sphere_mesh
+from render.raycast import (
     backproject,
     box_intersector,
     camera_rays,
@@ -19,7 +19,7 @@ from render import (
     render,
     sphere_intersector,
 )
-from sampling import (
+from render.sampling import (
     find_sharp_features,
     sample_surface,
     sample_uniform,

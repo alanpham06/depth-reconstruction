@@ -18,7 +18,7 @@ from typing import Callable
 
 import torch
 
-from geometry import Mesh
+from render.geometry import Mesh
 
 # (origin (3,), directions (R, 3)) -> (t (R,), world normals (R, 3)); t = inf on miss.
 Intersector = Callable[[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]

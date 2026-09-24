@@ -27,10 +27,11 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
 
-from baselines import evaluate_baselines
-from dataset import SparseDepthDataset, load_views
-from losses import completion_loss, depth_metrics, summarize_metrics
-from unet import UNet
+from datasets.sparse_depth import SparseDepthDataset, load_views
+from models.baselines import evaluate_baselines
+from models.losses import completion_loss
+from models.unet import UNet
+from utils.metrics import depth_metrics, summarize_metrics
 
 
 def parse_args() -> argparse.Namespace:

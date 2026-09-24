@@ -12,6 +12,8 @@ import plotly.graph_objects as go
 import torch
 from plotly.subplots import make_subplots
 
+from utils.paths import DATA, OUTPUT
+
 
 def load_shape(path: Path) -> dict[str, torch.Tensor]:
     if not path.exists():
@@ -75,7 +77,7 @@ def parse_args() -> argparse.Namespace:
         "paths",
         nargs="*",
         type=Path,
-        help="Optional .pt files. Defaults to sphere.pt and cube.pt",
+        help="Optional .pt files. Defaults to data/sphere.pt and data/cube.pt",
     )
     return parser.parse_args()
 
@@ -113,13 +115,13 @@ def open_html(path: Path) -> str:
 
 
 def main() -> None:
-    here = Path(__file__).resolve().parent
     args = parse_args()
-    paths = args.paths or [here / "sphere.pt", here / "cube.pt"]
+    paths = args.paths or [DATA / "sphere.pt", DATA / "cube.pt"]
     shapes = {path.stem: load_shape(path) for path in paths}
     figure = build_figure(shapes)
 
-    html_path = here / "viewer.html"
+    html_path = (OUTPUT / "plotting" / "viewer.html").resolve()
+    html_path.parent.mkdir(parents=True, exist_ok=True)
     figure.write_html(html_path, auto_open=False)
     opener = open_html(html_path)
     print(f"saved: {html_path}")

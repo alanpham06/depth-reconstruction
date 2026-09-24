@@ -24,8 +24,8 @@ RUN=${RUN:-runs/baseline}
 
 # Rendering is CPU-only; different view counts and seeds give val its own
 # camera poses and its own sparse samples.
-[ -f data/train/cube_gt.pt ] || python generate_gt.py --views "$TRAIN_VIEWS" --seed 0 --out data/train
-[ -f data/val/cube_gt.pt ] || python generate_gt.py --views "$VAL_VIEWS" --seed 1 --out data/val
+[ -f data/train/cube_gt.pt ] || python -m render.capture --views "$TRAIN_VIEWS" --seed 0 --out data/train
+[ -f data/val/cube_gt.pt ] || python -m render.capture --views "$VAL_VIEWS" --seed 1 --out data/val
 
 RESUME=()
 [ -f "$RUN/last.pt" ] && RESUME=(--resume "$RUN/last.pt")

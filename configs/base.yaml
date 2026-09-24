@@ -1,0 +1,25 @@
+# The recipe the phase-2 baseline trained with (scripts/train_baseline.sbatch on
+# main). Every run inherits it, so a result stays comparable to that baseline
+# unless it deliberately overrides a value.
+epochs: 100
+batch_size: 16
+lr: 0.001
+weight_decay: 0.0001
+# L1 depth plus this much multi-scale gradient matching, which is what keeps the
+# cube's creases sharp instead of rounded off
+grad_weight: 0.5
+base_channels: 32
+# Each training view keeps a fraction of its sparse points drawn from this range,
+# so one render teaches many densities
+keep_range: [0.3, 1.0]
+noise_std: 0.0
+# Only without --val: hold out every n-th view of the training captures
+val_every: 8
+# bfloat16 autocast. The UNet keeps its output layer in fp32, since bfloat16
+# would round the predicted depth to ~0.4%
+precision: bf16-mixed
+num_workers: 4
+panel_every: 10
+panel_images: 6
+log_every: 50
+seed: 0

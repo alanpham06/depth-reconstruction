@@ -149,3 +149,15 @@ def test_the_guarded_callback_still_carries_lightning_s_own_refusals(tmp_path):
     assert not callback._should_remove_checkpoint(
         trainer, resumed, str(directory / "demo_version_0_best.ckpt")
     )
+
+
+def test_the_checkpoint_callback_is_run_scoped():
+    import inspect
+
+    import train
+
+    source = inspect.getsource(train.main)
+    assert "ModelCheckpoint(" not in source, (
+        "an unscoped ModelCheckpoint can delete another run's file"
+    )
+    assert "RunScopedCheckpoint(" in source

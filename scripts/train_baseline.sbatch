@@ -14,9 +14,9 @@ set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/..}"
 mkdir -p logs
 
-# <- your environment, e.g. module load anaconda3 && conda activate depth-ml
+# <- your environment, e.g. module load anaconda3 && conda activate dr
 source ~/miniconda3/etc/profile.d/conda.sh
-conda activate depth-ml
+conda activate dr
 
 TRAIN_VIEWS=${TRAIN_VIEWS:-256}
 VAL_VIEWS=${VAL_VIEWS:-24}
@@ -28,12 +28,13 @@ RUN=${RUN:-runs/baseline}
 [ -f data/val/cube_gt.pt ] || python -m render.capture --views "$VAL_VIEWS" --seed 1 --out data/val
 
 RESUME=()
-[ -f "$RUN/last.pt" ] && RESUME=(--resume "$RUN/last.pt")
+LAST=checkpoints/$(basename "$RUN")_version_0_last.ckpt
+[ -f "$LAST" ] && RESUME=(--resume "$LAST")
 
 python train.py \
-	--train data/train/*_gt.pt \
-	--val data/val/*_gt.pt \
-	--out "$RUN" \
-	--epochs 100 --batch-size 16 --lr 1e-3 --grad-weight 0.5 \
-	--workers "${SLURM_CPUS_PER_TASK:-4}" --amp \
+	--config unet_b32 \
+	--train data/train \
+	--val data/val \
+	--name "$(basename "$RUN")" \
+	--num-workers "${SLURM_CPUS_PER_TASK:-4}" \
 	"${RESUME[@]}"

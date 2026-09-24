@@ -1,0 +1,3 @@
+# The phase-2 baseline: the UNet at width 32, about 7.8M parameters
+extends: base
+base_channels: 32

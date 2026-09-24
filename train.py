@@ -1,341 +1,333 @@
-"""Train the sparse-to-dense UNet baseline on rendered ground truth.
+"""train.py — sparse depth in, dense depth out, on the procedural shapes.
 
-The network sees (sparse depth, valid-point mask) and predicts dense depth
-relative to the mean sparse depth; the loss is L1 depth plus a multi-scale
-gradient-matching term, both only on pixels that hit the surface.
+The network sees (sparse depth, valid-point mask) and predicts dense depth relative
+to the mean sparse depth; the loss is L1 depth plus a multi-scale gradient-matching
+term, both only on pixels that hit the surface.
 
-  python train.py --train data/train/*_gt.pt --val data/val/*_gt.pt --out runs/baseline
+The loop is Lightning's; models/reconstruction_module.py holds the model, the loss
+and the schedule. A run is a config in configs/ plus a run name, and any flag beats
+the config.
 
-Without --val, every --val-every'th view of the training files is held out.
-Each run directory gets config.json, baselines.json (non-learned fills scored
-on the same validation split), metrics.csv, last.pt, best.pt (lowest
-validation MAE) and preview_<epoch>.png. --resume continues from a last.pt
-with the same --epochs (e.g. after a preempted job).
+A run writes runs/<name>/version_N/, and its models to
+checkpoints/<name>_version_N_{best,last}.ckpt. Re-running a name gets version_1
+rather than overwriting version_0, so a repeat is a new directory and never a lost
+result.
+
+Recipe
+------
+  python -m render.capture --views 256 --seed 0 --out data/train
+  python -m render.capture --views 24 --seed 1 --out data/val
+  python train.py --config unet_b32 --train data/train --val data/val --name baseline
+
+Different seeds and view counts give val its own camera poses and its own sparse
+samples. Without --val, every --val-every'th view of the training captures is held
+out instead.
+
+--resume continues from a last.ckpt with the same --epochs, e.g. after a preempted
+job: the OneCycle schedule is built from the run's length.
+
+Smoke (two epochs, tiny):
+  python train.py --train data/train --val data/val --epochs 2 --base-channels 8 \\
+      --limit-train-batches 4 --name smoke
 """
 
+from __future__ import annotations
+
 import argparse
-import csv
 import json
-import math
-import time
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import lightning as L
 import torch
+from lightning.pytorch.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
-from datasets.sparse_depth import SparseDepthDataset, build_datasets
-from models.baselines import evaluate_baselines
-from models.losses import completion_loss
-from models.unet import UNet
-from utils.metrics import depth_metrics, summarize_metrics
+from arguments.config import apply_config, given_options, load_config
+from datasets.sparse_depth import build_datasets, evenly_spaced_batch
+from models import count_parameters
+from models.reconstruction_module import (
+    PanelWriter,
+    RunScopedCheckpoint,
+    SparseDepthModule,
+)
+from utils.checkpoint import load_payload
+from utils.paths import RESOLVED_CONFIG, SAMPLES, SUMMARY, checkpoint_dir, run_stem
+
+PRECISIONS = ("bf16-mixed", "16-mixed", "32-true")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--train", type=Path, nargs="+", required=True, help="*_gt.pt files to train on"
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument(
+        "--train",
+        type=Path,
+        nargs="+",
+        required=True,
+        help="*_gt.pt files, or directories of them, to train on",
     )
-    parser.add_argument(
-        "--val", type=Path, nargs="*", default=None, help="held-out *_gt.pt files"
+    p.add_argument(
+        "--val",
+        type=Path,
+        nargs="*",
+        default=None,
+        help="held-out *_gt.pt files, or directories of them",
     )
-    parser.add_argument(
+    p.add_argument(
         "--val-every",
         type=int,
         default=8,
-        help="without --val: hold out every n-th view",
+        help="without --val: hold out every n-th view of the training captures",
     )
-    parser.add_argument(
-        "--out", type=Path, default=Path("runs") / time.strftime("%Y%m%d-%H%M%S")
+    p.add_argument(
+        "--config",
+        default=None,
+        help="a name in configs/ or a yaml path; a flag given here beats it",
     )
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument(
+    p.add_argument(
+        "--output",
+        default="runs",
+        help="where runs live; a run is <output>/<name>/version_N",
+    )
+    p.add_argument(
+        "--name",
+        default=None,
+        help="run name under --output; defaults to the config name. Re-running a "
+        "name gets version_1 rather than overwriting version_0",
+    )
+    p.add_argument("--epochs", type=int, default=100)
+    p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--weight-decay", type=float, default=1e-4)
+    p.add_argument(
         "--grad-weight", type=float, default=0.5, help="weight of the gradient loss"
     )
-    parser.add_argument(
-        "--base", type=int, default=32, help="UNet width at full resolution"
+    p.add_argument(
+        "--base-channels", type=int, default=32, help="UNet width at full resolution"
     )
-    parser.add_argument(
-        "--keep-range", type=float, nargs=2, default=(0.3, 1.0), metavar=("LOW", "HIGH")
+    p.add_argument(
+        "--keep-range",
+        type=float,
+        nargs=2,
+        default=(0.3, 1.0),
+        metavar=("LOW", "HIGH"),
+        help="each training view keeps a fraction of its sparse points from here",
     )
-    parser.add_argument(
+    p.add_argument(
         "--noise-std",
         type=float,
         default=0.0,
-        help="sparse depth noise during training",
+        help="sparse depth noise during training, in scene units",
     )
-    parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--amp", action="store_true", help="bfloat16 autocast on CUDA")
-    parser.add_argument(
-        "--preview-every", type=int, default=10, help="epochs between preview images"
+    p.add_argument("--num-workers", type=int, default=4)
+    p.add_argument(
+        "--precision",
+        default="bf16-mixed",
+        choices=PRECISIONS,
+        help="Lightning precision; 32-true without a CUDA device",
     )
-    parser.add_argument(
-        "--max-steps",
+    p.add_argument("--devices", type=int, default=1, help="GPUs; above 1 uses DDP")
+    p.add_argument(
+        "--panel-every", type=int, default=10, help="epochs between sample panels"
+    )
+    p.add_argument(
+        "--panel-images", type=int, default=6, help="rows in the sample panels"
+    )
+    p.add_argument(
+        "--log-every", type=int, default=50, help="steps between batch/ writes"
+    )
+    p.add_argument(
+        "--limit-train-batches",
         type=int,
         default=None,
-        help="stop each epoch after n batches (smoke tests)",
+        help="stop each epoch after n batches, for smoke tests; the schedule follows",
     )
-    parser.add_argument(
-        "--resume", type=Path, default=None, help="last.pt to continue from"
+    p.add_argument(
+        "--resume", type=Path, default=None, help="a last.ckpt to continue from"
     )
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument(
-        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
-    )
-    return parser.parse_args()
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--quiet", action="store_true", help="no progress bar")
+    return p
 
 
-def predict(model: UNet, batch: dict[str, torch.Tensor], amp: bool) -> torch.Tensor:
-    with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp):
-        residual = model(batch["input"])
-    return batch["ref"] + residual.float()
-
-
-@torch.no_grad()
-def evaluate(
-    model: UNet, loader: DataLoader, args: argparse.Namespace
-) -> dict[str, float]:
-    model.eval()
-    sums, loss_sum, batches = {}, 0.0, 0
-    for batch in loader:
-        batch = {
-            key: value.to(args.device, non_blocking=True)
-            for key, value in batch.items()
-        }
-        pred = predict(model, batch, args.amp)
-        loss, _ = completion_loss(
-            pred, batch["target"], batch["valid"], args.grad_weight
+def parse_args():
+    """The command line, with a named config filling in what it did not set"""
+    parser = build_parser()
+    args = parser.parse_args()
+    given = given_options(build_parser)
+    if args.config:
+        args.applied_config = apply_config(
+            args, load_config(args.config), given, parser
         )
-        loss_sum, batches = loss_sum + loss.item(), batches + 1
-        for key, value in depth_metrics(
-            pred, batch["target"], batch["valid"], batch["input"][:, 1:2]
-        ).items():
-            sums[key] = sums.get(key, 0) + value
-    return {"loss": loss_sum / max(batches, 1), **summarize_metrics(sums)}
+    else:
+        args.applied_config = []
+    if args.name is None:
+        args.name = args.config or "run"
+    return args
 
 
-@torch.no_grad()
-def save_preview(
-    model: UNet,
-    dataset: SparseDepthDataset,
-    args: argparse.Namespace,
-    path: Path,
-    n: int = 6,
-) -> None:
-    model.eval()
-    indices = (
-        torch.linspace(0, len(dataset) - 1, min(n, len(dataset)))
-        .round()
-        .long()
-        .tolist()
-    )
-    figure, axes = plt.subplots(
-        4, len(indices), figsize=(2.2 * len(indices), 9), squeeze=False
-    )
-    for column, index in enumerate(indices):
-        sample = {
-            key: value[None].to(args.device) for key, value in dataset[index].items()
-        }
-        pred = predict(model, sample, args.amp)[0, 0].cpu()
-        gt, valid = sample["target"][0, 0].cpu(), sample["valid"][0, 0].cpu()
-        sparse_mask = sample["input"][0, 1].cpu() > 0
-        sparse = (sample["input"][0, 0].cpu() + sample["ref"][0, 0].cpu()).masked_fill(
-            ~sparse_mask, math.nan
+def resolve_precision(precision: str, cuda: bool) -> str:
+    """Mixed precision wants a CUDA device; without one, full precision, and say so.
+
+    --amp did the same on main: autocast on the CPU is slower than float32 rather
+    than faster.
+    """
+    if cuda or precision == "32-true":
+        return precision
+    print(f"No CUDA device: --precision {precision} -> 32-true", flush=True)
+    return "32-true"
+
+
+def check_resume(args) -> None:
+    """--epochs must match the run being resumed: the OneCycle schedule is built from it."""
+    if args.resume is None:
+        return
+    recorded = load_payload(args.resume).get("hyper_parameters", {}).get("epochs")
+    if recorded is not None and recorded != args.epochs:
+        raise SystemExit(
+            f"--epochs must match the resumed run ({recorded}): "
+            "the LR schedule depends on it"
         )
-        low, high = gt[valid].min().item(), gt[valid].max().item()
-        panels = [
-            (sparse, dict(cmap="viridis", vmin=low, vmax=high)),
-            (
-                pred.masked_fill(~valid, math.nan),
-                dict(cmap="viridis", vmin=low, vmax=high),
-            ),
-            (
-                gt.masked_fill(~valid, math.nan),
-                dict(cmap="viridis", vmin=low, vmax=high),
-            ),
-            (
-                (pred - gt).abs().masked_fill(~valid, math.nan),
-                dict(cmap="magma", vmin=0, vmax=0.05 * (high - low + 1)),
-            ),
-        ]
-        for row, (image, style) in enumerate(panels):
-            axes[row, column].imshow(image.numpy(), **style)
-            axes[row, column].set_axis_off()
-        axes[0, column].set_title(f"val {index}", fontsize=8)
-    for row, label in enumerate(
-        ["sparse input", "prediction", "ground truth", "|error|"]
-    ):
-        axes[row, 0].text(
-            -0.08,
-            0.5,
-            label,
-            transform=axes[row, 0].transAxes,
-            rotation=90,
-            va="center",
-            ha="right",
-        )
-    figure.tight_layout()
-    figure.savefig(path, dpi=110)
-    plt.close(figure)
 
 
-def main() -> None:
+def main():
     args = parse_args()
-    torch.manual_seed(args.seed)
-    args.out.mkdir(parents=True, exist_ok=True)
-    args.amp = args.amp and args.device.startswith("cuda")
+    check_resume(args)
+    args.precision = resolve_precision(args.precision, torch.cuda.is_available())
+    L.seed_everything(args.seed, workers=True)
+    # Tensor cores, on a matmul that does not need the last bits of precision.
+    # nearest_fill does, and computes its distances without a matmul for that reason
+    torch.set_float32_matmul_precision("high")
+
+    print("=== Training run ===", flush=True)
+    print("Run:", f"{args.output}/{args.name}", flush=True)
+    if args.config:
+        filled = ", ".join(args.applied_config) or "nothing the command line left unset"
+        print(f"Config {args.config}: filled {filled}", flush=True)
 
     train_set, val_set = build_datasets(
         args.train, args.val, args.val_every, args.keep_range, args.noise_std
     )
-    loader_options = dict(
-        num_workers=args.workers, pin_memory=args.device.startswith("cuda")
+    print(f"Views: {len(train_set)} train, {len(val_set)} val", flush=True)
+
+    loader = dict(
+        num_workers=args.num_workers,
+        pin_memory=torch.cuda.is_available(),
+        persistent_workers=args.num_workers > 0,
     )
     train_loader = DataLoader(
         train_set,
         batch_size=args.batch_size,
         shuffle=True,
+        # A partial last batch only when it is the only batch, as on main
         drop_last=len(train_set) > args.batch_size,
-        persistent_workers=args.workers > 0,
-        **loader_options,
+        **loader,
     )
-    val_loader = DataLoader(val_set, batch_size=args.batch_size, **loader_options)
+    val_loader = DataLoader(val_set, batch_size=args.batch_size, **loader)
 
-    model = UNet(in_channels=2, out_channels=1, base=args.base).to(args.device)
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    module = SparseDepthModule(
+        base_channels=args.base_channels,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        grad_weight=args.grad_weight,
+        epochs=args.epochs,
+        panel_images=args.panel_images,
     )
-    steps_per_epoch = min(len(train_loader), args.max_steps or len(train_loader))
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer,
-        max_lr=args.lr,
-        total_steps=args.epochs * steps_per_epoch,
-        pct_start=0.05,
-    )
-    start_epoch, best_mae = 0, math.inf
-    if args.resume:
-        state = torch.load(args.resume, map_location=args.device)
-        if state["config"]["epochs"] != args.epochs:
-            raise SystemExit(
-                f"--epochs must match the resumed run ({state['config']['epochs']}): the LR schedule depends on it"
-            )
-        model.load_state_dict(state["model"])
-        optimizer.load_state_dict(state["optimizer"])
-        scheduler.load_state_dict(state["scheduler"])
-        start_epoch, best_mae = state["epoch"] + 1, state["best_mae"]
-
-    config = {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in vars(args).items()
-    }
-    config["train"], config["val"] = (
-        [str(p) for p in args.train],
-        [str(p) for p in args.val or []],
-    )
-    (args.out / "config.json").write_text(json.dumps(config, indent=2))
-    n_params = sum(p.numel() for p in model.parameters())
     print(
-        f"train={len(train_set)} val={len(val_set)} params={n_params / 1e6:.2f}M device={args.device} -> {args.out}"
+        f"Model: params={count_parameters(module.model):,} "
+        f"(base_channels={args.base_channels})",
+        flush=True,
     )
-    baselines = evaluate_baselines(val_loader)
-    (args.out / "baselines.json").write_text(json.dumps(baselines, indent=2))
-    for name, metrics in baselines.items():
-        print(
-            f"baseline {name:8s} val mae {metrics['mae']:.4f} rmse {metrics['rmse']:.4f} hole mae {metrics['hole_mae']:.4f} d1 {metrics['delta1']:.3f}"
+    print(f"Loss: l1 + {args.grad_weight} * grad", flush=True)
+
+    # default_hp_metric would add an empty hp_metric tag to every run
+    logger = TensorBoardLogger(
+        save_dir=args.output, name=args.name, default_hp_metric=False
+    )
+    run = Path(logger.log_dir)
+    run.mkdir(parents=True, exist_ok=True)
+    # So a result is reproducible from the run directory, not the shell history
+    (run / RESOLVED_CONFIG).write_text(
+        json.dumps(vars(args), indent=2, sort_keys=True, default=str) + "\n",
+        encoding="utf-8",
+    )
+
+    # A few hundred views is a shorter epoch than the default logging interval, and
+    # Lightning then writes the batch/ curves once an epoch or not at all, which is
+    # the resolution train/ already has
+    log_every = min(args.log_every, max(1, len(train_loader)))
+
+    # last.ckpt every epoch and best.ckpt on the lowest val/mae take two
+    # callbacks: with a monitor, Lightning rewrites last.ckpt only on an epoch
+    # where best also improved, so a resume would restart from the best epoch
+    # rather than the last one.
+    last = RunScopedCheckpoint(
+        run_stem(run),
+        dirpath=checkpoint_dir(run),
+        save_top_k=0,
+        save_last=True,
+        every_n_epochs=1,
+    )
+    # save_last ignores filename=, so this is the only thing that names it
+    last.CHECKPOINT_NAME_LAST = f"{run_stem(run)}_last"
+    best = RunScopedCheckpoint(
+        run_stem(run),
+        dirpath=checkpoint_dir(run),
+        filename=f"{run_stem(run)}_best",
+        monitor="val/mae",
+        mode="min",
+    )
+    panels = PanelWriter(
+        {
+            "train": evenly_spaced_batch(train_set, args.panel_images),
+            "val": evenly_spaced_batch(val_set, args.panel_images),
+        },
+        every=args.panel_every,
+        samples_dir=run / SAMPLES,
+    )
+
+    trainer = L.Trainer(
+        max_epochs=args.epochs,
+        accelerator="auto",
+        devices=args.devices,
+        strategy="ddp" if args.devices > 1 else "auto",
+        precision=args.precision,
+        logger=logger,
+        default_root_dir=args.output,
+        log_every_n_steps=log_every,
+        limit_train_batches=args.limit_train_batches,
+        callbacks=[last, best, panels],
+        enable_progress_bar=not args.quiet,
+    )
+    print(f"TensorBoard events -> {run.resolve()}", flush=True)
+    trainer.fit(module, train_loader, val_loader, ckpt_path=args.resume)
+
+    metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
+    best_score = best.best_model_score
+    (run / SUMMARY).write_text(
+        json.dumps(
+            {
+                "run": args.name,
+                "version": run.name,
+                "config": args.config,
+                "epochs": args.epochs,
+                "train_views": len(train_set),
+                "val_views": len(val_set),
+                "parameters": count_parameters(module.model),
+                "hyperparameters": dict(module.hparams),
+                "best_checkpoint": best.best_model_path,
+                "best_val_mae": None if best_score is None else float(best_score),
+                "metrics": metrics,
+            },
+            indent=2,
+            default=str,
         )
-
-    log_path = args.out / "metrics.csv"
-    fields = [
-        "epoch",
-        "lr",
-        "train_loss",
-        "train_l1",
-        "train_grad",
-        "val_loss",
-        "val_mae",
-        "val_rmse",
-        "val_abs_rel",
-        "val_delta1",
-        "val_hole_mae",
-        "seconds",
-    ]
-    if not log_path.exists():
-        with log_path.open("w", newline="") as f:
-            csv.writer(f).writerow(fields)
-
-    for epoch in range(start_epoch, args.epochs):
-        model.train()
-        started = time.time()
-        totals, steps = {"loss": 0.0, "l1": 0.0, "grad": 0.0}, 0
-        for step, batch in enumerate(train_loader):
-            if step == steps_per_epoch:
-                break
-            batch = {
-                key: value.to(args.device, non_blocking=True)
-                for key, value in batch.items()
-            }
-            pred = predict(model, batch, args.amp)
-            loss, parts = completion_loss(
-                pred, batch["target"], batch["valid"], args.grad_weight
-            )
-            optimizer.zero_grad(set_to_none=True)
-            lr = optimizer.param_groups[0]["lr"]
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
-            totals = {key: totals[key] + parts[key] for key in totals}
-            steps += 1
-        train = {key: value / max(steps, 1) for key, value in totals.items()}
-        val = evaluate(model, val_loader, args)
-        seconds = time.time() - started
-
-        row = [
-            epoch,
-            lr,
-            train["loss"],
-            train["l1"],
-            train["grad"],
-            val["loss"],
-            val["mae"],
-            val["rmse"],
-            val["abs_rel"],
-            val["delta1"],
-            val["hole_mae"],
-            seconds,
-        ]
-        with log_path.open("a", newline="") as f:
-            csv.writer(f).writerow(
-                [f"{x:.6g}" if isinstance(x, float) else x for x in row]
-            )
-        print(
-            f"epoch {epoch:3d}  train loss {train['loss']:.4f} (l1 {train['l1']:.4f}, grad {train['grad']:.4f})  "
-            f"val mae {val['mae']:.4f} rmse {val['rmse']:.4f} hole mae {val['hole_mae']:.4f} "
-            f"d1 {val['delta1']:.3f}  {seconds:.0f}s"
-        )
-
-        state = {
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "scheduler": scheduler.state_dict(),
-            "epoch": epoch,
-            "best_mae": min(best_mae, val["mae"]),
-            "config": config,
-            "val": val,
-        }
-        torch.save(state, args.out / "last.pt")
-        if val["mae"] < best_mae:
-            best_mae = val["mae"]
-            torch.save(state, args.out / "best.pt")
-        if (epoch + 1) % args.preview_every == 0 or epoch + 1 == args.epochs:
-            save_preview(
-                model, val_set, args, args.out / f"preview_{epoch + 1:03d}.png"
-            )
+        + "\n",
+        encoding="utf-8",
+    )
+    mae, nearest = metrics.get("val/mae"), metrics.get("val/mae_nearest")
+    if mae is not None and nearest is not None:
+        print(f"val/mae {mae:.4f} against nearest {nearest:.4f}", flush=True)
+    print(f"Done -> {run.resolve()}")
 
 
 if __name__ == "__main__":

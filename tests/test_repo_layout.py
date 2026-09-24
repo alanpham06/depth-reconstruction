@@ -29,3 +29,10 @@ def test_the_point_clouds_land_in_data(tmp_path, monkeypatch):
     monkeypatch.setattr(point_cloud, "DATA", tmp_path)
     point_cloud.main()
     assert {p.name for p in tmp_path.iterdir()} == {"sphere.pt", "cube.pt"}
+
+
+def test_the_config_dir_resolves_to_the_repo_root():
+    import arguments.config as config
+
+    assert config.CONFIG_DIR == REPO_ROOT / "configs"
+    assert (config.CONFIG_DIR / "base.yaml").is_file()

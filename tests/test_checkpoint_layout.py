@@ -10,6 +10,7 @@ They guard two defects that ship when nothing checks them:
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -87,3 +88,64 @@ def test_a_nested_runs_directory_still_puts_models_outside_runs(tmp_path):
 def test_the_ordinary_run_shape_keeps_the_name_it_already_had(tmp_path):
     """Checkpoints migrated before the collision fix must still resolve."""
     assert run_stem(tmp_path / "runs" / "demo" / "version_0") == "demo_version_0"
+
+
+def test_a_resumed_run_does_not_delete_the_previous_version_s_best(tmp_path):
+    """The flat checkpoints/ silently disarmed BOTH of Lightning's guards.
+
+    `ModelCheckpoint.load_state_dict` reloads `best_k_models` only when its
+    dirpath equals the one recorded in the checkpoint. Per-version dirpaths never
+    matched, so a resume started with empty bookkeeping; one shared checkpoints/
+    always matches, so version_1 resumes holding version_0's best path. Then
+    `_should_remove_checkpoint` permits a delete anywhere under dirpath, which
+    used to be this run's own directory and is now everybody's -- so the first
+    improvement deleted the older run's best.ckpt.
+
+    The rule is simply that a run only ever deletes its own files.
+    """
+    from models.reconstruction_module import RunScopedCheckpoint
+
+    run = tmp_path / "runs" / "demo" / "version_1"
+    directory = checkpoint_dir(run)
+    directory.mkdir(parents=True)
+    callback = RunScopedCheckpoint(
+        run_stem(run),
+        dirpath=directory,
+        filename=f"{run_stem(run)}_best",
+        monitor="val/loss",
+        mode="min",
+    )
+    trainer = SimpleNamespace(ckpt_path=None)
+    mine = str(directory / "demo_version_1_best.ckpt")
+
+    theirs = str(directory / "demo_version_0_best.ckpt")
+    assert not callback._should_remove_checkpoint(trainer, theirs, mine), (
+        "deleted another run's checkpoint"
+    )
+    assert not callback._should_remove_checkpoint(
+        trainer, str(directory / "ablation_version_0_best.ckpt"), mine
+    )
+
+    # ... while still pruning its own superseded files, which is the whole job
+    assert callback._should_remove_checkpoint(
+        trainer, str(directory / "demo_version_1_best-v1.ckpt"), mine
+    ), "stopped pruning its own checkpoints"
+
+
+def test_the_guarded_callback_still_carries_lightning_s_own_refusals(tmp_path):
+    """The override narrows Lightning's rule, it must not replace it: the file
+    the trainer resumed from is still never deleted."""
+    from models.reconstruction_module import RunScopedCheckpoint
+
+    run = tmp_path / "runs" / "demo" / "version_0"
+    directory = checkpoint_dir(run)
+    directory.mkdir(parents=True)
+    callback = RunScopedCheckpoint(
+        run_stem(run), dirpath=directory, monitor="val/loss", mode="min"
+    )
+    resumed = str(directory / "demo_version_0_last.ckpt")
+    trainer = SimpleNamespace(ckpt_path=resumed)
+
+    assert not callback._should_remove_checkpoint(
+        trainer, resumed, str(directory / "demo_version_0_best.ckpt")
+    )

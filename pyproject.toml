@@ -9,7 +9,7 @@ description = "Sparse-to-dense depth completion on procedurally rendered ground 
 requires-python = ">=3.11"
 
 [tool.setuptools]
-packages = ["arguments", "datasets", "export", "models", "plotting", "render", "utils"]
+packages = ["arguments", "datasets", "eval", "export", "models", "plotting", "render", "utils"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

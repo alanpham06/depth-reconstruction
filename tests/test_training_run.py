@@ -15,6 +15,7 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 
 import render.capture as capture
 import train
+from eval import eval as eval_cli
 from utils.metrics import METRICS
 
 SIZE, PANEL_IMAGES = 32, 2
@@ -160,3 +161,37 @@ def test_a_resume_with_a_different_epoch_count_is_refused(run):
     with pytest.raises(SystemExit, match="--epochs must match the resumed run"):
         train.check_resume(SimpleNamespace(resume=last, epochs=3))
     train.check_resume(SimpleNamespace(resume=last, epochs=2))
+
+
+def _evaluate(run, output, *extra):
+    eval_cli.main(
+        [
+            "--checkpoint",
+            str(run.checkpoints / "tiny_version_0_best.ckpt"),
+            "--val",
+            str(run.val),
+            "--output",
+            str(output),
+            *extra,
+        ]
+    )
+    return json.loads((output / "metrics.json").read_text())
+
+
+def test_eval_reproduces_the_number_best_ckpt_was_chosen_on(run):
+    results = _evaluate(run, run.root / "eval")
+    summary = json.loads((run.dir / "summary.json").read_text())
+    assert results["all"]["model"]["mae"] == pytest.approx(
+        summary["best_val_mae"], rel=1e-4
+    )
+    assert set(results) == {"cube", "sphere_ico", "sphere_uv", "all"}
+    for scores in results.values():
+        assert set(scores) == {"model", "constant", "nearest"}
+        assert all(tuple(metrics) == METRICS for metrics in scores.values())
+    assert (run.root / "eval" / "panel.png").is_file()
+
+
+def test_eval_without_panels_writes_only_the_numbers(run):
+    output = run.root / "eval_no_panels"
+    _evaluate(run, output, "--num-panels", "0")
+    assert sorted(p.name for p in output.iterdir()) == ["metrics.json"]

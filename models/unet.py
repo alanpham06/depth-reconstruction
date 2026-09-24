@@ -68,3 +68,19 @@ class UNet(nn.Module):
         # predicted depth to ~0.4%, coarser than the errors we want to resolve.
         with torch.autocast(x.device.type, enabled=False):
             return self.head(x.float())[..., :height, :width]
+
+
+def make_model(base_channels: int = 32) -> UNet:
+    """The completion network: centred sparse depth and its mask in, depth - ref out."""
+    return UNet(in_channels=2, out_channels=1, base=base_channels)
+
+
+def count_parameters(model: nn.Module) -> int:
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def predict(
+    network: nn.Module, inputs: torch.Tensor, ref: torch.Tensor
+) -> torch.Tensor:
+    """Metric depth. The network predicts depth relative to ref, the mean sparse depth."""
+    return ref + network(inputs).float()

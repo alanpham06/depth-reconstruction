@@ -5,6 +5,6 @@ import it into the executorch conda env, which has neither Lightning nor
 matplotlib.
 """
 
-from models.unet import UNet
+from models.unet import UNet, count_parameters, make_model, predict
 
-__all__ = ["UNet"]
+__all__ = ["UNet", "count_parameters", "make_model", "predict"]

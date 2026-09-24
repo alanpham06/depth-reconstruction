@@ -161,3 +161,90 @@ def test_the_checkpoint_callback_is_run_scoped():
         "an unscoped ModelCheckpoint can delete another run's file"
     )
     assert "RunScopedCheckpoint(" in source
+
+
+def test_last_ckpt_is_written_after_every_epoch(tmp_path, monkeypatch):
+    """save_last only writes last.ckpt when training ends -- a job preempted
+    mid-run would have nothing current to resume from."""
+    import sys
+
+    import lightning as L
+    import torch
+    from torch.utils.data import DataLoader
+
+    import render.capture as capture
+    from datasets.sparse_depth import build_datasets
+    from models.reconstruction_module import RunScopedCheckpoint, SparseDepthModule
+
+    data = tmp_path / "data"
+    for split, views, seed in (("train", 4, 0), ("val", 2, 1)):
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "capture",
+                "--views",
+                str(views),
+                "--size",
+                "32",
+                "--points",
+                "300",
+                "--seed",
+                str(seed),
+                "--out",
+                str(data / split),
+            ],
+        )
+        capture.main()
+    train_set, val_set = build_datasets(
+        [data / "train"], [data / "val"], 8, (0.3, 1.0), 0.0
+    )
+
+    run = tmp_path / "runs" / "demo" / "version_0"
+    stem, directory = run_stem(run), checkpoint_dir(run)
+    directory.mkdir(parents=True)
+    last_path = directory / f"{stem}_last.ckpt"
+    last = RunScopedCheckpoint(
+        stem,
+        dirpath=directory,
+        filename=f"{stem}_last",
+        save_top_k=1,
+        every_n_epochs=1,
+    )
+    best = RunScopedCheckpoint(
+        stem,
+        dirpath=directory,
+        filename=f"{stem}_best",
+        monitor="val/mae",
+        mode="min",
+    )
+
+    seen = []
+
+    class _RecordLastEpoch(L.Callback):
+        def on_train_epoch_start(self, trainer, module):
+            seen.append(
+                torch.load(last_path, map_location="cpu", weights_only=False)["epoch"]
+                if last_path.is_file()
+                else None
+            )
+
+    trainer = L.Trainer(
+        max_epochs=4,
+        accelerator="cpu",
+        logger=False,
+        enable_progress_bar=False,
+        num_sanity_val_steps=0,
+        callbacks=[last, best, _RecordLastEpoch()],
+    )
+    trainer.fit(
+        SparseDepthModule(base_channels=8, epochs=4),
+        DataLoader(train_set, batch_size=4),
+        DataLoader(val_set, batch_size=4),
+    )
+
+    assert seen == [None, 0, 1, 2]
+    assert sorted(p.name for p in directory.iterdir()) == [
+        f"{stem}_best.ckpt",
+        f"{stem}_last.ckpt",
+    ]

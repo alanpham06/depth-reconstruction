@@ -256,23 +256,22 @@ def main():
     # the resolution train/ already has
     log_every = min(args.log_every, max(1, len(train_loader)))
 
-    # last.ckpt every epoch and best.ckpt on the lowest val/mae take two
-    # callbacks: with a monitor, Lightning rewrites last.ckpt only on an epoch
-    # where best also improved, so a resume would restart from the best epoch
-    # rather than the last one.
+    stem = run_stem(run)
+    directory = checkpoint_dir(run)
+    # last.ckpt after every epoch, so a preempted job resumes where it stopped: no
+    # monitor and save_top_k=1 keep the one newest checkpoint under this name.
+    # save_last would write it only when training ends.
     last = RunScopedCheckpoint(
-        run_stem(run),
-        dirpath=checkpoint_dir(run),
-        save_top_k=0,
-        save_last=True,
+        stem,
+        dirpath=directory,
+        filename=f"{stem}_last",
+        save_top_k=1,
         every_n_epochs=1,
     )
-    # save_last ignores filename=, so this is the only thing that names it
-    last.CHECKPOINT_NAME_LAST = f"{run_stem(run)}_last"
     best = RunScopedCheckpoint(
-        run_stem(run),
-        dirpath=checkpoint_dir(run),
-        filename=f"{run_stem(run)}_best",
+        stem,
+        dirpath=directory,
+        filename=f"{stem}_best",
         monitor="val/mae",
         mode="min",
     )

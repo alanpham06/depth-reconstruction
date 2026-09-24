@@ -39,7 +39,7 @@ goes up two levels, and every stage takes its locations from there. Getting this
 wrong raises nothing: the capture writes to `render/data`, and nothing reads it.
 `tests/test_repo_layout.py` pins it.
 
-**`models/`, `datasets/sparse_depth.py` and `utils/{paths,checkpoint}.py` import only
+**`models/__init__.py`, `models/unet.py`, `datasets/sparse_depth.py` and `utils/{paths,checkpoint}.py` import only
 torch.** The export runs in the `executorch` conda env, which has neither Lightning
 nor matplotlib. That is why the panel drawing lives in `utils/panel.py` and not in
 the module.
@@ -127,7 +127,7 @@ construct that works wins.
 - Ruff: 88 columns, 4-space indent, double quotes, lf line endings,
   `target-version = "py311"`, lint rules `["E4", "E7", "E9", "F", "I"]`.
   `.editorconfig` holds the same numbers for other files.
-- `from __future__ import annotations` opens most modules outside `tests/`.
+- A new module outside `tests/` starts with `from __future__ import annotations`.
 - `pathlib.Path` throughout, never `os.path`.
 
 ### Commits

@@ -83,7 +83,7 @@ or `*_gt.pt` files. Without `--val`, every `--val-every`-th view is held out.
 `--epochs`. `scripts/train_baseline.sbatch` runs capture and training as one
 cluster job.
 
-A run writes `runs/<name>/version_N/` (events, `config.json`, `summary.json`,
+A run writes `runs/<name>/version_N/` (events, `config.json`, `hparams.yaml`, `summary.json`,
 `samples/`) and its models to `checkpoints/<name>_version_N_{best,last}.ckpt`.
 `best.ckpt` has the lowest `val/mae`.
 
@@ -123,6 +123,7 @@ tensorboard --logdir runs --port 6006
 | `val/mae`, `val/rmse`, `val/abs_rel`, `val/delta1`, `val/hole_mae` | pooled over every valid pixel of the split; `hole_mae` counts only pixels with no sparse point |
 | `val/*_nearest`, `val/*_constant` | the same five for the two fills that use no network |
 | `lr/recon` | the OneCycle rate at the start of each epoch |
+| `epoch` | Lightning's own epoch counter |
 | `{train,val}/sparse_pred_gt_error` | sparse input │ prediction │ ground truth │ error, one row per view |
 
 **Read `val/mae` against `val/mae_nearest`.** Copying each pixel's nearest sparse

@@ -199,17 +199,16 @@ class SparseDepthModule(L.LightningModule):
 class RunScopedCheckpoint(ModelCheckpoint):
     """A ModelCheckpoint that only ever deletes its own run's files.
 
-    Every run writes into one shared checkpoints/ now, and that quietly disarmed
-    both of the guards Lightning relies on to not delete somebody else's model:
+    Every run writes into one shared checkpoints/ directory, and Lightning's own
+    guards assume a dirpath that belongs to one run:
 
       - `load_state_dict` reloads `best_k_models` only when its dirpath equals the
-        one recorded in the checkpoint. Per-version dirpaths never matched, so a
-        resume began with empty bookkeeping. One shared directory always matches,
-        so a resumed run now starts out holding the *previous* version's best path.
+        one recorded in the checkpoint. A shared directory always matches, so a
+        resumed run starts out holding whichever version wrote there last.
       - `_should_remove_checkpoint` then permits a delete anywhere under dirpath,
-        which used to be this run's own directory and is now every run's.
+        which is every run's directory here.
 
-    With both gone, resuming version_0 into version_1 deleted
+    Together those would let resuming version_0 into version_1 delete
     checkpoints/<run>_version_0_best.ckpt on the first improvement -- exactly the
     loss that moving the models out of runs/ was meant to make impossible.
 
@@ -223,7 +222,9 @@ class RunScopedCheckpoint(ModelCheckpoint):
         self._run_stem = run_stem
 
     def _should_remove_checkpoint(self, trainer, previous: str, current: str) -> bool:
-        if not Path(previous).name.startswith(self._run_stem):
+        # The trailing "_" matters: demo_version_1 is also a string prefix of
+        # demo_version_10, which is a different run's stem.
+        if not Path(previous).name.startswith(f"{self._run_stem}_"):
             return False
         return super()._should_remove_checkpoint(trainer, previous, current)
 

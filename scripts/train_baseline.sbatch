@@ -20,7 +20,7 @@ conda activate dr
 
 TRAIN_VIEWS=${TRAIN_VIEWS:-256}
 VAL_VIEWS=${VAL_VIEWS:-24}
-RUN=${RUN:-runs/baseline}
+NAME=${NAME:-baseline}
 
 # Rendering is CPU-only; different view counts and seeds give val its own
 # camera poses and its own sparse samples.
@@ -28,13 +28,13 @@ RUN=${RUN:-runs/baseline}
 [ -f data/val/cube_gt.pt ] || python -m render.capture --views "$VAL_VIEWS" --seed 1 --out data/val
 
 RESUME=()
-LAST=checkpoints/$(basename "$RUN")_version_0_last.ckpt
+LAST=$(ls -v checkpoints/"$NAME"_version_*_last.ckpt 2>/dev/null | tail -n 1 || true)
 [ -f "$LAST" ] && RESUME=(--resume "$LAST")
 
 python train.py \
 	--config unet_b32 \
 	--train data/train \
 	--val data/val \
-	--name "$(basename "$RUN")" \
+	--name "$NAME" \
 	--num-workers "${SLURM_CPUS_PER_TASK:-4}" \
 	"${RESUME[@]}"

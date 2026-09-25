@@ -110,3 +110,12 @@ def test_mixed_precision_without_cuda_falls_back_to_full(capsys):
     assert "32-true" in capsys.readouterr().out
     assert train.resolve_precision("bf16-mixed", cuda=True) == "bf16-mixed"
     assert train.resolve_precision("32-true", cuda=False) == "32-true"
+
+
+def test_log_every_is_capped_by_the_batches_an_epoch_actually_runs():
+    """A short smoke epoch must not leave log_every_n_steps above the number of
+    steps the epoch takes, or Lightning logs the batch/ curves not at all."""
+    assert train.resolve_log_every(log_every=50, train_batches=3, limit=None) == 3
+    assert train.resolve_log_every(log_every=50, train_batches=3, limit=2) == 2
+    assert train.resolve_log_every(log_every=1, train_batches=3, limit=None) == 1
+    assert train.resolve_log_every(log_every=50, train_batches=0, limit=None) == 1

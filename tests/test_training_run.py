@@ -18,6 +18,7 @@ import render.capture as capture
 import train
 from eval import eval as eval_cli
 from utils.metrics import METRICS
+from utils.paths import checkpoint_dir
 
 SIZE, PANEL_IMAGES = 32, 2
 LOSS_TERMS = ("loss", "l1", "grad")
@@ -162,6 +163,29 @@ def test_a_resume_with_a_different_epoch_count_is_refused(run):
     with pytest.raises(SystemExit, match="--epochs must match the resumed run"):
         train.check_resume(SimpleNamespace(resume=last, epochs=3))
     train.check_resume(SimpleNamespace(resume=last, epochs=2))
+
+
+def test_output_without_a_runs_ancestor_is_refused(tmp_path):
+    """checkpoint_dir falls back to writing beside the run itself with no runs/
+    ancestor, which would silently break the checkpoints-beside-runs layout."""
+    with pytest.raises(SystemExit, match="runs"):
+        train.check_output_inside_runs(tmp_path / "somewhere" / "demo" / "version_0")
+    train.check_output_inside_runs(tmp_path / "runs" / "demo" / "version_0")
+
+
+def test_a_repeated_name_does_not_overwrite_an_earlier_run_s_checkpoints(tmp_path):
+    """Hit after runs/ is cleared and Lightning's version numbering restarts from
+    version_0, which would otherwise silently overwrite the earlier version_0."""
+    run = tmp_path / "runs" / "demo" / "version_0"
+    directory = checkpoint_dir(run)
+    directory.mkdir(parents=True)
+    (directory / "demo_version_0_best.ckpt").touch()
+
+    with pytest.raises(SystemExit, match="demo_version_0_best.ckpt"):
+        train.check_no_existing_checkpoints(run)
+    # a different name, or a version bumped by a real re-run, is unaffected
+    train.check_no_existing_checkpoints(tmp_path / "runs" / "other" / "version_0")
+    train.check_no_existing_checkpoints(tmp_path / "runs" / "demo" / "version_1")
 
 
 def _evaluate(run, output, *extra):

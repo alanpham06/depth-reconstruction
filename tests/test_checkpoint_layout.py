@@ -1,19 +1,14 @@
 """Where a trained model is written, and what still finds it there.
 
-They guard two defects that ship when nothing checks them:
-
-  - save_last ignores `filename=`. Lightning formats CHECKPOINT_NAME_LAST, so in a
-    shared checkpoints/ every run wrote one anonymous last.ckpt, then last-v1,
-    last-v2, with nothing recording which run owned which.
-  - a checkpoint named in any other shape must come back as itself, never as a
-    name built from the checkout's parent directories.
+They guard a defect that ships when nothing checks it: a checkpoint named in any
+other shape must come back as itself, never as a name built from the checkout's
+parent directories.
 """
 
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from lightning.pytorch.callbacks import ModelCheckpoint
 
 from utils.paths import CHECKPOINTS, checkpoint_dir, run_name, run_stem
 
@@ -36,18 +31,6 @@ def test_checkpoint_dir_follows_the_run_not_the_working_directory(tmp_path):
     assert REPO_ROOT not in got.parents
 
 
-def test_save_last_names_the_run(tmp_path):
-    """Lightning reads CHECKPOINT_NAME_LAST here, never filename=."""
-    stem = "demo_version_0"
-    callback = ModelCheckpoint(
-        dirpath=tmp_path, filename=f"{stem}_best", save_last=True
-    )
-    callback.CHECKPOINT_NAME_LAST = f"{stem}_last"
-    assert callback.CHECKPOINT_NAME_LAST == f"{stem}_last"
-    # the default is what would land in a shared directory unnamed
-    assert ModelCheckpoint.CHECKPOINT_NAME_LAST == "last"
-
-
 @pytest.mark.parametrize(
     "path,expected",
     [
@@ -61,10 +44,9 @@ def test_a_checkpoint_names_its_run(path, expected):
 
 @pytest.mark.parametrize("name", ["last.ckpt", "demo_version_0_best-v1.ckpt"])
 def test_an_unparsable_checkpoint_name_does_not_become_a_directory_name(name):
-    """These two are files Lightning really writes. Keyed off the filename suffix
-    they fell into the nested branch and resolved to the checkout's parents."""
+    """Lightning really writes both of these; neither ends in _best or _last, so
+    each must come back as its own stem."""
     got = run_name(f"checkpoints/{name}")
-    assert "Desktop" not in got, got
     assert got in {"last", "demo_version_0_best-v1"}, got
 
 
@@ -86,20 +68,19 @@ def test_a_nested_runs_directory_still_puts_models_outside_runs(tmp_path):
 
 
 def test_the_ordinary_run_shape_keeps_the_name_it_already_had(tmp_path):
-    """Checkpoints migrated before the collision fix must still resolve."""
+    """For the ordinary runs/<name>/version_N shape, the stem is <name>_version_N."""
     assert run_stem(tmp_path / "runs" / "demo" / "version_0") == "demo_version_0"
 
 
 def test_a_resumed_run_does_not_delete_the_previous_version_s_best(tmp_path):
-    """The flat checkpoints/ silently disarmed BOTH of Lightning's guards.
+    """One shared checkpoints/ directory can disarm both of Lightning's guards.
 
     `ModelCheckpoint.load_state_dict` reloads `best_k_models` only when its
-    dirpath equals the one recorded in the checkpoint. Per-version dirpaths never
-    matched, so a resume started with empty bookkeeping; one shared checkpoints/
-    always matches, so version_1 resumes holding version_0's best path. Then
-    `_should_remove_checkpoint` permits a delete anywhere under dirpath, which
-    used to be this run's own directory and is now everybody's -- so the first
-    improvement deleted the older run's best.ckpt.
+    dirpath equals the one recorded in the checkpoint, and a shared checkpoints/
+    always matches -- so version_1 resumes holding version_0's best path. Then
+    `_should_remove_checkpoint` permits a delete anywhere under dirpath, which is
+    every run's directory here -- so the first improvement would delete the
+    older run's best.ckpt.
 
     The rule is simply that a run only ever deletes its own files.
     """
@@ -125,6 +106,10 @@ def test_a_resumed_run_does_not_delete_the_previous_version_s_best(tmp_path):
     assert not callback._should_remove_checkpoint(
         trainer, str(directory / "ablation_version_0_best.ckpt"), mine
     )
+    # demo_version_1's bare stem is also a *string* prefix of demo_version_10's
+    assert not callback._should_remove_checkpoint(
+        trainer, str(directory / "demo_version_10_best.ckpt"), mine
+    ), "treated another run's longer version number as its own"
 
     # ... while still pruning its own superseded files, which is the whole job
     assert callback._should_remove_checkpoint(
@@ -156,11 +141,10 @@ def test_the_checkpoint_callback_is_run_scoped():
 
     import train
 
-    source = inspect.getsource(train.main)
-    assert "ModelCheckpoint(" not in source, (
+    assert "ModelCheckpoint(" not in inspect.getsource(train.main), (
         "an unscoped ModelCheckpoint can delete another run's file"
     )
-    assert "RunScopedCheckpoint(" in source
+    assert "RunScopedCheckpoint(" in inspect.getsource(train.checkpoint_callbacks)
 
 
 def test_last_ckpt_is_written_after_every_epoch(tmp_path, monkeypatch):
@@ -173,8 +157,9 @@ def test_last_ckpt_is_written_after_every_epoch(tmp_path, monkeypatch):
     from torch.utils.data import DataLoader
 
     import render.capture as capture
+    import train
     from datasets.sparse_depth import build_datasets
-    from models.reconstruction_module import RunScopedCheckpoint, SparseDepthModule
+    from models.reconstruction_module import SparseDepthModule
 
     data = tmp_path / "data"
     for split, views, seed in (("train", 4, 0), ("val", 2, 1)):
@@ -204,29 +189,23 @@ def test_last_ckpt_is_written_after_every_epoch(tmp_path, monkeypatch):
     stem, directory = run_stem(run), checkpoint_dir(run)
     directory.mkdir(parents=True)
     last_path = directory / f"{stem}_last.ckpt"
-    last = RunScopedCheckpoint(
-        stem,
-        dirpath=directory,
-        filename=f"{stem}_last",
-        save_top_k=1,
-        every_n_epochs=1,
-    )
-    best = RunScopedCheckpoint(
-        stem,
-        dirpath=directory,
-        filename=f"{stem}_best",
-        monitor="val/mae",
-        mode="min",
-    )
+    best, last = train.checkpoint_callbacks(run)
 
     seen = []
 
     class _RecordLastEpoch(L.Callback):
         def on_train_epoch_start(self, trainer, module):
-            seen.append(
-                torch.load(last_path, map_location="cpu", weights_only=False)["epoch"]
-                if last_path.is_file()
-                else None
+            if not last_path.is_file():
+                seen.append(None)
+                return
+            payload = torch.load(last_path, map_location="cpu", weights_only=False)
+            seen.append(payload["epoch"])
+            # last.ckpt carries every callback's state, including best's -- if
+            # last's hook ran before best's for the epoch just finished, this
+            # would still read the previous epoch's score
+            saved = payload["callbacks"][best.state_key]["best_model_score"]
+            assert saved == pytest.approx(float(best.best_model_score)), (
+                "last.ckpt's copy of best_model_score is stale"
             )
 
     trainer = L.Trainer(
@@ -235,7 +214,7 @@ def test_last_ckpt_is_written_after_every_epoch(tmp_path, monkeypatch):
         logger=False,
         enable_progress_bar=False,
         num_sanity_val_steps=0,
-        callbacks=[last, best, _RecordLastEpoch()],
+        callbacks=[best, last, _RecordLastEpoch()],
     )
     trainer.fit(
         SparseDepthModule(base_channels=8, epochs=4),

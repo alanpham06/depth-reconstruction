@@ -125,7 +125,6 @@ def build_parser() -> argparse.ArgumentParser:
         choices=PRECISIONS,
         help="Lightning precision; 32-true without a CUDA device",
     )
-    p.add_argument("--devices", type=int, default=1, help="GPUs; above 1 uses DDP")
     p.add_argument(
         "--panel-every", type=int, default=10, help="epochs between sample panels"
     )
@@ -189,6 +188,75 @@ def check_resume(args) -> None:
         )
 
 
+def check_output_inside_runs(run: Path) -> None:
+    """--output must put a run inside a directory named runs.
+
+    checkpoint_dir falls back to writing beside the run itself when there is no
+    runs ancestor, which would silently break the checkpoints-beside-runs layout.
+    """
+    if "runs" not in run.resolve().parts:
+        raise SystemExit(
+            f"{run} has no runs/ ancestor: checkpoints/ sits beside runs/, not "
+            "inside it -- point --output at (or inside) a directory named runs"
+        )
+
+
+def check_no_existing_checkpoints(run: Path) -> None:
+    """Refuses a --name whose checkpoints already exist.
+
+    Hit after runs/ was cleared and Lightning's version numbering restarted from
+    version_0; a resume always logs a new version, so a new stem, and is
+    unaffected.
+    """
+    stem = run_stem(run)
+    existing = sorted(checkpoint_dir(run).glob(f"{stem}_*.ckpt"))
+    if existing:
+        raise SystemExit(
+            f"{existing[0]} already exists: delete it or choose another --name"
+        )
+
+
+def resolve_log_every(log_every: int, train_batches: int, limit: int | None) -> int:
+    """batch/ writes are capped by the batches an epoch actually runs.
+
+    A few hundred views is a shorter epoch than the default logging interval, and
+    a smoke run's --limit-train-batches shortens it further; either way Lightning
+    must write the batch/ curves at least once an epoch rather than never.
+    """
+    batches = min(train_batches, limit or train_batches)
+    return min(log_every, max(1, batches))
+
+
+def checkpoint_callbacks(run: Path) -> list[RunScopedCheckpoint]:
+    """best and last, in the order that keeps last.ckpt's copy of best current.
+
+    Lightning runs same-hook callbacks in list order, and a checkpoint captures
+    every callback's state -- so best must process each epoch's validation
+    before last saves, or every last.ckpt carries the previous epoch's best
+    score. Best first does that.
+    """
+    stem = run_stem(run)
+    directory = checkpoint_dir(run)
+    best = RunScopedCheckpoint(
+        stem,
+        dirpath=directory,
+        filename=f"{stem}_best",
+        monitor="val/mae",
+        mode="min",
+    )
+    # last.ckpt after every epoch, so a preempted job resumes where it stopped: no
+    # monitor and save_top_k=1 keep the one newest checkpoint under this name.
+    # save_last would write it only when training ends.
+    last = RunScopedCheckpoint(
+        stem,
+        dirpath=directory,
+        filename=f"{stem}_last",
+        save_top_k=1,
+        every_n_epochs=1,
+    )
+    return [best, last]
+
+
 def main():
     args = parse_args()
     check_resume(args)
@@ -244,6 +312,8 @@ def main():
         save_dir=args.output, name=args.name, default_hp_metric=False
     )
     run = Path(logger.log_dir)
+    check_output_inside_runs(run)
+    check_no_existing_checkpoints(run)
     run.mkdir(parents=True, exist_ok=True)
     # So a result is reproducible from the run directory, not the shell history
     (run / RESOLVED_CONFIG).write_text(
@@ -251,30 +321,10 @@ def main():
         encoding="utf-8",
     )
 
-    # A few hundred views is a shorter epoch than the default logging interval, and
-    # Lightning then writes the batch/ curves once an epoch or not at all, which is
-    # the resolution train/ already has
-    log_every = min(args.log_every, max(1, len(train_loader)))
-
-    stem = run_stem(run)
-    directory = checkpoint_dir(run)
-    # last.ckpt after every epoch, so a preempted job resumes where it stopped: no
-    # monitor and save_top_k=1 keep the one newest checkpoint under this name.
-    # save_last would write it only when training ends.
-    last = RunScopedCheckpoint(
-        stem,
-        dirpath=directory,
-        filename=f"{stem}_last",
-        save_top_k=1,
-        every_n_epochs=1,
+    log_every = resolve_log_every(
+        args.log_every, len(train_loader), args.limit_train_batches
     )
-    best = RunScopedCheckpoint(
-        stem,
-        dirpath=directory,
-        filename=f"{stem}_best",
-        monitor="val/mae",
-        mode="min",
-    )
+    best, last = checkpoint_callbacks(run)
     panels = PanelWriter(
         {
             "train": evenly_spaced_batch(train_set, args.panel_images),
@@ -287,14 +337,13 @@ def main():
     trainer = L.Trainer(
         max_epochs=args.epochs,
         accelerator="auto",
-        devices=args.devices,
-        strategy="ddp" if args.devices > 1 else "auto",
+        devices=1,
         precision=args.precision,
         logger=logger,
         default_root_dir=args.output,
         log_every_n_steps=log_every,
         limit_train_batches=args.limit_train_batches,
-        callbacks=[last, best, panels],
+        callbacks=[best, last, panels],
         enable_progress_bar=not args.quiet,
     )
     print(f"TensorBoard events -> {run.resolve()}", flush=True)

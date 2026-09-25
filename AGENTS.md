@@ -40,12 +40,14 @@ float32 reads 0.005207.
 run's length, and `train.check_resume` refuses anything else.
 
 **Paths resolve from the repo root, not from `__file__`'s package.** `utils/paths.py`
-goes up two levels and anchors `data/` there, so a capture or a training run reads
-and writes the same `data/` regardless of the working directory. `runs/`,
-`checkpoints/` and `output/` are relative to the directory a command runs in, not
-to the repo root; the README's commands all assume that directory is the repo
-root. Getting the repo-root resolution wrong raises nothing: the capture writes to
-`render/data`, and nothing reads it. `tests/test_repo_layout.py` pins it.
+goes up two levels and anchors `DATA` there: it is `render.capture`'s default
+`--out`, and where the point clouds and the plots live, so those resolve from the
+repo root regardless of the working directory. Paths given on the command line
+(`--out`, `--train`, `--val`) are taken as given, and `runs/`, `checkpoints/` and
+`output/` are relative to the directory a command runs in; the README's commands
+all assume that directory is the repo root. Getting the repo-root resolution wrong
+raises nothing: the capture writes to `render/data`, and nothing reads it.
+`tests/test_repo_layout.py` pins it.
 
 **`models/__init__.py`, `models/unet.py`, `datasets/sparse_depth.py` and `utils/{paths,checkpoint}.py` import only
 torch.** The export runs in the `executorch` conda env, which has neither Lightning

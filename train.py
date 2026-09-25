@@ -205,8 +205,9 @@ def check_resume(args) -> None:
 def check_output_inside_runs(run: Path) -> None:
     """--output must put a run inside a directory named runs.
 
-    checkpoint_dir falls back to writing beside the run itself when there is no
-    runs ancestor, which would silently break the checkpoints-beside-runs layout.
+    checkpoint_dir falls back to writing checkpoints/ inside the run itself when
+    there is no runs ancestor, which would silently break the
+    checkpoints-beside-runs layout.
     """
     if "runs" not in run.resolve().parts:
         raise SystemExit(
@@ -338,7 +339,8 @@ def main():
     log_every = resolve_log_every(
         args.log_every, len(train_loader), args.limit_train_batches
     )
-    best, last = checkpoint_callbacks(run)
+    checkpoints = checkpoint_callbacks(run)
+    best = checkpoints[0]  # best before last; see checkpoint_callbacks
     panels = PanelWriter(
         {
             "train": evenly_spaced_batch(train_set, args.panel_images),
@@ -357,7 +359,7 @@ def main():
         default_root_dir=args.output,
         log_every_n_steps=log_every,
         limit_train_batches=args.limit_train_batches,
-        callbacks=[best, last, panels],
+        callbacks=[*checkpoints, panels],
         enable_progress_bar=not args.quiet,
     )
     print(f"TensorBoard events -> {run.resolve()}", flush=True)

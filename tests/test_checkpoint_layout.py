@@ -189,7 +189,8 @@ def test_last_ckpt_is_written_after_every_epoch(tmp_path, monkeypatch):
     stem, directory = run_stem(run), checkpoint_dir(run)
     directory.mkdir(parents=True)
     last_path = directory / f"{stem}_last.ckpt"
-    best, last = train.checkpoint_callbacks(run)
+    checkpoints = train.checkpoint_callbacks(run)
+    best = checkpoints[0]  # best before last; see checkpoint_callbacks
 
     seen = []
 
@@ -214,7 +215,7 @@ def test_last_ckpt_is_written_after_every_epoch(tmp_path, monkeypatch):
         logger=False,
         enable_progress_bar=False,
         num_sanity_val_steps=0,
-        callbacks=[best, last, _RecordLastEpoch()],
+        callbacks=[*checkpoints, _RecordLastEpoch()],
     )
     trainer.fit(
         SparseDepthModule(base_channels=8, epochs=4),

@@ -166,8 +166,9 @@ def test_a_resume_with_a_different_epoch_count_is_refused(run):
 
 
 def test_output_without_a_runs_ancestor_is_refused(tmp_path):
-    """checkpoint_dir falls back to writing beside the run itself with no runs/
-    ancestor, which would silently break the checkpoints-beside-runs layout."""
+    """checkpoint_dir falls back to writing checkpoints/ inside the run itself
+    with no runs/ ancestor, which would silently break the checkpoints-beside-runs
+    layout."""
     with pytest.raises(SystemExit, match="runs"):
         train.check_output_inside_runs(tmp_path / "somewhere" / "demo" / "version_0")
     train.check_output_inside_runs(tmp_path / "runs" / "demo" / "version_0")

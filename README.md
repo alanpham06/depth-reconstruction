@@ -84,8 +84,10 @@ or `*_gt.pt` files. Without `--val`, every `--val-every`-th view is held out.
 cluster job.
 
 A run writes `runs/<name>/version_N/` (events, `config.json`, `hparams.yaml`, `summary.json`,
-`samples/`) and its models to `checkpoints/<name>_version_N_{best,last}.ckpt`.
-`best.ckpt` has the lowest `val/mae`.
+`samples/`) and `checkpoints/<name>_version_N_last.ckpt` after every epoch.
+`checkpoints/<name>_version_N_best.ckpt` is written whenever `val/mae` reaches a new low; a
+resumed run keeps the earlier version's `best.ckpt` until it beats it, and may never write
+its own.
 
 **The Lightning port trains to main's number.** Measured 2026-09-24 with this recipe
 on one capture (256 train and 24 val views per shape), final `val/mae`: main's

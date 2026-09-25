@@ -158,13 +158,6 @@ def test_the_schedule_steps_once_per_batch_over_the_whole_run(run):
     assert group["weight_decay"] == pytest.approx(1e-4)
 
 
-def test_a_resume_with_a_different_epoch_count_is_refused(run):
-    last = run.checkpoints / "tiny_version_0_last.ckpt"
-    with pytest.raises(SystemExit, match="--epochs must match the resumed run"):
-        train.check_resume(SimpleNamespace(resume=last, epochs=3))
-    train.check_resume(SimpleNamespace(resume=last, epochs=2))
-
-
 def test_output_without_a_runs_ancestor_is_refused(tmp_path):
     """checkpoint_dir falls back to writing checkpoints/ inside the run itself
     with no runs/ ancestor, which would silently break the checkpoints-beside-runs

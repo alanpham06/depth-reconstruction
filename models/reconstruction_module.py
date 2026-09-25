@@ -37,7 +37,6 @@ from pathlib import Path
 
 import lightning as L
 import torch
-from lightning.pytorch.callbacks import ModelCheckpoint
 from torchvision.utils import make_grid, save_image
 
 from models import make_model, predict
@@ -65,8 +64,8 @@ class SparseDepthModule(L.LightningModule):
         panel_images: int = 6,
     ):
         super().__init__()
-        # epochs is recorded so a resume can refuse a different one: the OneCycle
-        # schedule is built from the run's length
+        # epochs is recorded because the OneCycle schedule is built from the
+        # run's length
         self.save_hyperparameters()
         self.model = make_model(base_channels)
         self.pooled = PooledMetrics()
@@ -195,39 +194,6 @@ class SparseDepthModule(L.LightningModule):
         batch = {key: value[:n].to(self.device) for key, value in batch.items()}
         pred = self(batch["input"], batch["ref"])
         return depth_panel(batch, pred), len(PANEL_COLUMNS), PANEL_COLUMNS
-
-
-class RunScopedCheckpoint(ModelCheckpoint):
-    """A ModelCheckpoint that only ever deletes its own run's files.
-
-    Every run writes into one shared checkpoints/ directory, and Lightning's own
-    guards assume a dirpath that belongs to one run:
-
-      - `load_state_dict` reloads `best_k_models` only when its dirpath equals the
-        one recorded in the checkpoint. A shared directory always matches, so a
-        resumed run starts out holding whichever version wrote there last.
-      - `_should_remove_checkpoint` then permits a delete anywhere under dirpath,
-        which is every run's directory here.
-
-    Together those would let resuming version_0 into version_1 delete
-    checkpoints/<run>_version_0_best.ckpt on the first improvement -- exactly the
-    loss that moving the models out of runs/ was meant to make impossible.
-
-    The rule this restores is narrow and is only ever a refusal: a file whose name
-    does not begin with this run's stem is not this run's to remove. Lightning's
-    own refusals still apply on top.
-    """
-
-    def __init__(self, run_stem: str, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._run_stem = run_stem
-
-    def _should_remove_checkpoint(self, trainer, previous: str, current: str) -> bool:
-        # The trailing "_" matters: demo_version_1 is also a string prefix of
-        # demo_version_10, which is a different run's stem.
-        if not Path(previous).name.startswith(f"{self._run_stem}_"):
-            return False
-        return super()._should_remove_checkpoint(trainer, previous, current)
 
 
 class PanelWriter(L.Callback):

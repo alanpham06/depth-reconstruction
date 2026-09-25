@@ -27,14 +27,9 @@ NAME=${NAME:-baseline}
 [ -f data/train/cube_gt.pt ] || python -m render.capture --views "$TRAIN_VIEWS" --seed 0 --out data/train
 [ -f data/val/cube_gt.pt ] || python -m render.capture --views "$VAL_VIEWS" --seed 1 --out data/val
 
-RESUME=()
-LAST=$(ls -v checkpoints/"$NAME"_version_*_last.ckpt 2>/dev/null | tail -n 1 || true)
-[ -f "$LAST" ] && RESUME=(--resume "$LAST")
-
 python train.py \
 	--config unet_b32 \
 	--train data/train \
 	--val data/val \
 	--name "$NAME" \
-	--num-workers "${SLURM_CPUS_PER_TASK:-4}" \
-	"${RESUME[@]}"
+	--num-workers "${SLURM_CPUS_PER_TASK:-4}"

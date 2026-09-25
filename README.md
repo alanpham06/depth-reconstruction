@@ -79,15 +79,11 @@ python train.py --config unet_b32 --train data/train --val data/val --name basel
 every batch, 100 epochs of batch 16, L1 plus 0.5 of the gradient loss, bf16. A flag
 given on the command line beats the config. `--train` and `--val` take directories
 or `*_gt.pt` files. Without `--val`, every `--val-every`-th view is held out.
-`--resume checkpoints/<run>_version_N_last.ckpt` continues a run that used the same
-`--epochs`. `scripts/train_baseline.sbatch` runs capture and training as one
-cluster job.
+`scripts/train_baseline.sbatch` runs capture and training as one cluster job.
 
 A run writes `runs/<name>/version_N/` (events, `config.json`, `hparams.yaml`, `summary.json`,
 `samples/`) and `checkpoints/<name>_version_N_last.ckpt` after every epoch.
-`checkpoints/<name>_version_N_best.ckpt` is written whenever `val/mae` reaches a new low; a
-resumed run keeps the earlier version's `best.ckpt` until it beats it, and may never write
-its own.
+`checkpoints/<name>_version_N_best.ckpt` is written whenever `val/mae` reaches a new low.
 
 **The Lightning port trains to main's number.** Measured 2026-09-24 with this recipe
 on one capture (256 train and 24 val views per shape), final `val/mae`: main's

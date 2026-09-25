@@ -36,9 +36,6 @@ Under the shipped bf16-mixed recipe the two differ by precision alone: measured
 the two equivalence checkpoints; scoring the first under bf16 instead of
 float32 reads 0.005207.
 
-**`--resume` needs the same `--epochs`.** The OneCycle schedule is built from the
-run's length, and `train.check_resume` refuses anything else.
-
 **Paths resolve from the repo root, not from `__file__`'s package.** `utils/paths.py`
 goes up two levels and anchors `DATA` there: it is `render.capture`'s default
 `--out`, and where the point clouds and the plots live, so those resolve from the
@@ -115,8 +112,9 @@ construct that works wins.
 - Bad input raises at once and names the offending value:
   `raise ValueError(f"config {key} must be one of {allowed}, got {value!r}")`.
 - A CLI-level problem is `raise SystemExit(...)` with a message that says what is
-  wrong and what it would have cost: `--epochs must match the resumed run (100): the
-  LR schedule depends on it`.
+  wrong and what it would have cost: `output/baseline/version_0 has no runs/
+  ancestor: checkpoints/ sits beside runs/, not inside it -- point --output at (or
+  inside) a directory named runs`.
 - Nothing fails silently. A wrong convention or path that "doesn't raise" is the
   failure to design against, because it reads as a worse result instead of an error.
 - Status goes to stdout with plain `print(...)`, not `logging`; a line that must show

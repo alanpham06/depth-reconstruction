@@ -129,3 +129,11 @@ def test_a_panel_setting_below_one_is_refused(monkeypatch, flag, value):
     monkeypatch.setattr(sys, "argv", ["train.py", *REQUIRED, flag, value])
     with pytest.raises(SystemExit, match=f"{flag}.*{value}"):
         train.parse_args()
+
+
+def test_a_run_cannot_be_resumed(monkeypatch, capsys):
+    """fit always starts fresh now: --resume is not a flag this parser knows."""
+    monkeypatch.setattr(sys, "argv", ["train.py", *REQUIRED, "--resume", "x.ckpt"])
+    with pytest.raises(SystemExit):
+        train.parse_args()
+    assert "unrecognized arguments: --resume" in capsys.readouterr().err

@@ -25,9 +25,6 @@ Different seeds and view counts give val its own camera poses and its own sparse
 samples. Without --val, every --val-every'th view of the training captures is held
 out instead.
 
---resume continues from a last.ckpt with the same --epochs, e.g. after a preempted
-job: the OneCycle schedule is built from the run's length.
-
 Smoke (two epochs, tiny):
   python train.py --train data/train --val data/val --epochs 2 --base-channels 8 \\
       --limit-train-batches 4 --name smoke
@@ -41,18 +38,14 @@ from pathlib import Path
 
 import lightning as L
 import torch
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from arguments.config import apply_config, given_options, load_config
 from datasets.sparse_depth import build_datasets, evenly_spaced_batch
 from models import count_parameters
-from models.reconstruction_module import (
-    PanelWriter,
-    RunScopedCheckpoint,
-    SparseDepthModule,
-)
-from utils.checkpoint import load_payload
+from models.reconstruction_module import PanelWriter, SparseDepthModule
 from utils.paths import RESOLVED_CONFIG, SAMPLES, SUMMARY, checkpoint_dir, run_stem
 
 # Lightning's Trainer(precision=...) choices this repo exposes
@@ -143,9 +136,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="stop each epoch after n batches, for smoke tests; the schedule follows",
     )
-    p.add_argument(
-        "--resume", type=Path, default=None, help="a last.ckpt to continue from"
-    )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--quiet", action="store_true", help="no progress bar")
     return p
@@ -190,18 +180,6 @@ def resolve_precision(precision: str, cuda: bool) -> str:
     return "32-true"
 
 
-def check_resume(args) -> None:
-    """--epochs must match the run being resumed: the OneCycle schedule is built from it."""
-    if args.resume is None:
-        return
-    recorded = load_payload(args.resume).get("hyper_parameters", {}).get("epochs")
-    if recorded is not None and recorded != args.epochs:
-        raise SystemExit(
-            f"--epochs must match the resumed run ({recorded}): "
-            "the LR schedule depends on it"
-        )
-
-
 def check_output_inside_runs(run: Path) -> None:
     """--output must put a run inside a directory named runs.
 
@@ -220,8 +198,7 @@ def check_no_existing_checkpoints(run: Path) -> None:
     """Refuses a --name whose checkpoints already exist.
 
     Hit after runs/ was cleared and Lightning's version numbering restarted from
-    version_0; a resume always logs a new version, so a new stem, and is
-    unaffected.
+    version_0.
     """
     stem = run_stem(run)
     existing = sorted(checkpoint_dir(run).glob(f"{stem}_*.ckpt"))
@@ -242,7 +219,7 @@ def resolve_log_every(log_every: int, train_batches: int, limit: int | None) -> 
     return min(log_every, max(1, batches))
 
 
-def checkpoint_callbacks(run: Path) -> list[RunScopedCheckpoint]:
+def checkpoint_callbacks(run: Path) -> list[ModelCheckpoint]:
     """best and last, in the order that keeps last.ckpt's copy of best current.
 
     Lightning runs same-hook callbacks in list order, and a checkpoint captures
@@ -252,18 +229,16 @@ def checkpoint_callbacks(run: Path) -> list[RunScopedCheckpoint]:
     """
     stem = run_stem(run)
     directory = checkpoint_dir(run)
-    best = RunScopedCheckpoint(
-        stem,
+    best = ModelCheckpoint(
         dirpath=directory,
         filename=f"{stem}_best",
         monitor="val/mae",
         mode="min",
     )
-    # last.ckpt after every epoch, so a preempted job resumes where it stopped: no
-    # monitor and save_top_k=1 keep the one newest checkpoint under this name.
-    # save_last would write it only when training ends.
-    last = RunScopedCheckpoint(
-        stem,
+    # last.ckpt after every epoch, so a run that dies mid-epoch still leaves a
+    # current model behind: no monitor and save_top_k=1 keep the one newest
+    # checkpoint under this name. save_last would write it only when training ends.
+    last = ModelCheckpoint(
         dirpath=directory,
         filename=f"{stem}_last",
         save_top_k=1,
@@ -274,7 +249,6 @@ def checkpoint_callbacks(run: Path) -> list[RunScopedCheckpoint]:
 
 def main():
     args = parse_args()
-    check_resume(args)
     args.precision = resolve_precision(args.precision, torch.cuda.is_available())
     L.seed_everything(args.seed, workers=True)
     # Tensor cores, on a matmul that does not need the last bits of precision.
@@ -363,7 +337,7 @@ def main():
         enable_progress_bar=not args.quiet,
     )
     print(f"TensorBoard events -> {run.resolve()}", flush=True)
-    trainer.fit(module, train_loader, val_loader, ckpt_path=args.resume)
+    trainer.fit(module, train_loader, val_loader)
 
     metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
     best_score = best.best_model_score

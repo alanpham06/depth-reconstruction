@@ -148,6 +148,16 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def check_panel_settings(args) -> None:
+    """A panel needs at least one row, and at least one epoch between panels."""
+    for flag, value in (
+        ("--panel-images", args.panel_images),
+        ("--panel-every", args.panel_every),
+    ):
+        if value < 1:
+            raise SystemExit(f"{flag} must be at least 1, got {value}")
+
+
 def parse_args():
     """The command line, with a named config filling in what it did not set"""
     parser = build_parser()
@@ -161,6 +171,7 @@ def parse_args():
         args.applied_config = []
     if args.name is None:
         args.name = args.config or "run"
+    check_panel_settings(args)
     return args
 
 

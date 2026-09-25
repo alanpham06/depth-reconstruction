@@ -119,3 +119,13 @@ def test_log_every_is_capped_by_the_batches_an_epoch_actually_runs():
     assert train.resolve_log_every(log_every=50, train_batches=3, limit=2) == 2
     assert train.resolve_log_every(log_every=1, train_batches=3, limit=None) == 1
     assert train.resolve_log_every(log_every=50, train_batches=0, limit=None) == 1
+
+
+@pytest.mark.parametrize("flag", ["--panel-images", "--panel-every"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_a_panel_setting_below_one_is_refused(monkeypatch, flag, value):
+    """0 crashed at startup (panel-images) or after a whole epoch (panel-every);
+    a panel needs at least one row and at least one epoch between panels."""
+    monkeypatch.setattr(sys, "argv", ["train.py", *REQUIRED, flag, value])
+    with pytest.raises(SystemExit, match=f"{flag}.*{value}"):
+        train.parse_args()

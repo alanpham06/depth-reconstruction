@@ -114,6 +114,9 @@ depth and its mask go in as `(1, 2, H, W)`, and metric depth comes out, with the
 centring inside the graph. It is **GPU only**: if the partitioner leaves any op on
 the CPU fallback, the export fails and writes nothing.
 
+`tests/test_export.py::test_the_whole_graph_lowers_to_vulkan` runs only where both
+`executorch` and `pytest` are installed together, and skips otherwise.
+
 ## TensorBoard
 
 ```bash

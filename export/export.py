@@ -26,6 +26,7 @@ executorch conda env, which has neither Lightning nor matplotlib.
 from __future__ import annotations
 
 import argparse
+import operator
 import os
 import shutil
 from pathlib import Path
@@ -119,12 +120,14 @@ def lower(module, example):
 
 
 def undelegated_ops(program) -> list[str]:
-    """The aten ops the backend left for the CPU, read off the lowered graph.
+    """The ops the backend left for the CPU, read off the lowered graph.
 
     Read rather than matched against a list: a hardcoded list of "ops Vulkan cannot
     take" goes stale silently in both directions, and the graph already says which
-    nodes ended up outside a delegate call. Anything listed here runs on the
-    portable fallback, and fails at LOAD time in an app built with
+    nodes ended up outside a delegate call. Every call_function node counts except
+    the delegate call itself and operator.getitem, which only unpacks the
+    delegate's own output tuple. Anything else listed here runs on the portable
+    fallback, and fails at LOAD time in an app built with
     EXECUTORCH_BUILD_PORTABLE_OPS=OFF -- so a clean export here is not proof the
     .pte runs on the device.
     """
@@ -135,11 +138,9 @@ def undelegated_ops(program) -> list[str]:
             continue
         if "executorch_call_delegate" in str(node.target):
             continue
-        if (
-            "aten" in str(node.target)
-            or getattr(node.target, "namespace", "") == "aten"
-        ):
-            ops.add(str(node.target))
+        if node.target is operator.getitem:
+            continue
+        ops.add(str(node.target))
     return sorted(ops)
 
 

@@ -10,8 +10,6 @@ so they are scored with exactly the same metrics.
 
 import torch
 
-from utils.metrics import depth_metrics, summarize_metrics
-
 
 def constant_fill(inputs: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
     """inputs (B, 2, H, W), ref (B, 1, 1, 1) -> (B, 1, H, W)."""
@@ -52,17 +50,3 @@ def nearest_fill(
 
 
 BASELINES = {"constant": constant_fill, "nearest": nearest_fill}
-
-
-@torch.no_grad()
-def evaluate_baselines(loader) -> dict[str, dict[str, float]]:
-    """Metrics of every baseline over a DataLoader of SparseDepthDataset batches."""
-    sums = {name: {} for name in BASELINES}
-    for batch in loader:
-        for name, fill in BASELINES.items():
-            pred = fill(batch["input"], batch["ref"])
-            for key, value in depth_metrics(
-                pred, batch["target"], batch["valid"], batch["input"][:, 1:2]
-            ).items():
-                sums[name][key] = sums[name].get(key, 0) + value
-    return {name: summarize_metrics(value) for name, value in sums.items()}

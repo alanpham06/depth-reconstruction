@@ -13,3 +13,4 @@ packages = ["arguments", "datasets", "eval", "export", "models", "plotting", "re
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

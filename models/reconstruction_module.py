@@ -23,6 +23,12 @@ batch's sums, and on_validation_epoch_end divides once, exactly as evaluate() di
 on main. Lightning's own epoch mean would weight a batch of small silhouettes the
 same as a batch of large ones. val/loss, val/l1 and val/grad are Lightning's
 batch-size-weighted means; they are not what picks best.ckpt.
+
+**The baselines are pooled this way only through the first full validation.**
+constant_fill and nearest_fill use no network, so their numbers never change;
+validation_step stops adding to them once they have been through one complete
+validation (the sanity check does not count), and on_validation_epoch_end logs
+that pooled result again on every later epoch instead of re-running the fills.
 """
 
 from __future__ import annotations
@@ -63,6 +69,9 @@ class SparseDepthModule(L.LightningModule):
         self.save_hyperparameters()
         self.model = make_model(base_channels)
         self.pooled = PooledMetrics()
+        # Set once the baselines have been through a full validation; see
+        # on_validation_epoch_end
+        self.baselines = None
 
     def forward(self, inputs: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
         return predict(self.model, inputs, ref)
@@ -109,15 +118,22 @@ class SparseDepthModule(L.LightningModule):
             )
         sparse = batch["input"][:, 1:2]
         self.pooled.add("model", pred, batch["target"], batch["valid"], sparse)
-        for name, fill in BASELINES.items():
-            fill_pred = fill(batch["input"], batch["ref"])
-            self.pooled.add(name, fill_pred, batch["target"], batch["valid"], sparse)
+        if self.baselines is None:
+            # No network moves these, so they only need scoring once
+            for name, fill in BASELINES.items():
+                fill_pred = fill(batch["input"], batch["ref"])
+                self.pooled.add(
+                    name, fill_pred, batch["target"], batch["valid"], sparse
+                )
 
     def on_validation_epoch_end(self) -> None:
         def total(value):
             return self.trainer.strategy.reduce(value, reduce_op="sum")
 
-        for name, metrics in self.pooled.summarize(reduce=total).items():
+        summary = self.pooled.summarize(reduce=total)
+        if self.baselines is None and not self.trainer.sanity_checking:
+            self.baselines = {name: m for name, m in summary.items() if name != "model"}
+        for name, metrics in {**(self.baselines or {}), **summary}.items():
             suffix = "" if name == "model" else f"_{name}"
             for metric, value in metrics.items():
                 # Already summed across processes; sync_dist only averages the
@@ -131,13 +147,16 @@ class SparseDepthModule(L.LightningModule):
 
     def on_before_optimizer_step(self, optimizer):
         # A prediction that has started to diverge shows up here an epoch before
-        # it shows up as a flat loss curve
-        total = sum(
-            float(p.grad.detach().norm(2)) ** 2
-            for p in self.model.parameters()
-            if p.grad is not None
+        # it shows up as a flat loss curve. One tensor op rather than a python
+        # float() per parameter, which synced the GPU once per parameter every step.
+        grad_norms = torch.stack(
+            [
+                p.grad.detach().norm(2)
+                for p in self.model.parameters()
+                if p.grad is not None
+            ]
         )
-        self.log("batch/grad_norm", total**0.5, on_step=True, on_epoch=False)
+        self.log("batch/grad_norm", grad_norms.norm(2), on_step=True, on_epoch=False)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(

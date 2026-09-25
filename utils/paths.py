@@ -28,7 +28,7 @@ DATA = REPO / "data"
 # Relative: a tool's output lands under the directory it was run from
 OUTPUT = Path("output")
 
-CHECKPOINTS = "checkpoints"
+CHECKPOINTS = "checkpoints"  # checkpoint_dir's directory name, beside runs/
 SUMMARY = "summary.json"
 RESOLVED_CONFIG = "config.json"
 SAMPLES = "samples"
@@ -42,8 +42,7 @@ def checkpoint_dir(run_dir: str | Path) -> Path:
     """<repo>/checkpoints, beside runs/ rather than inside it.
 
     runs/ is telemetry -- events, sample grids, the resolved config -- and deleting
-    it to clear TensorBoard should not destroy the models. It did once: 1.5 GB of
-    trained checkpoints went with a single `rm -rf runs/*`.
+    it to clear TensorBoard should not destroy the models.
 
     Resolved by walking up out of runs/ rather than from the working directory, so
     a test handed a tmp_path writes into its own sandbox instead of the repo.
@@ -62,8 +61,7 @@ def run_stem(run_dir: str | Path) -> str:
     are different runs. Keyed on the last component alone they produced one
     filename and the second silently overwrote the first.
 
-    Unchanged for the ordinary runs/<name>/version_N shape, so checkpoints written
-    before this still resolve.
+    For the ordinary runs/<name>/version_N shape this is just <name>_version_N.
     """
     run_dir = Path(run_dir).resolve()
     root = _runs_root(run_dir)

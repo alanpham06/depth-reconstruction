@@ -4,9 +4,13 @@
 
 Every number is pooled over the valid pixels of what it names -- one capture file,
 which is one shape, or all of them -- exactly as training's val/ tags are, so the
-"all" row of a best.ckpt reproduces the val/mae it was chosen on. The constant and
-nearest rows score the same views with no network at all: read the model against
-nearest, never on its own.
+"all" row of a best.ckpt reproduces the val/mae it was chosen on -- for a run
+trained at 32-true, the same precision eval always scores at. Under the shipped
+bf16-mixed recipe the two differ by that precision alone: measured 0.004993
+against a training-logged 0.005201, and 0.004545 against 0.004603, on the two
+equivalence checkpoints; scoring the first under bf16 instead of float32 reads
+0.005207. The constant and nearest rows score the same views with no network at
+all: read the model against nearest, never on its own.
 
 Writes metrics.json and panel.png to output/eval/<run>_<source>/, where <source> is
 the directory the captures came from.

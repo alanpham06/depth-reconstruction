@@ -14,6 +14,7 @@ from __future__ import annotations
 import torch
 from matplotlib import colormaps
 
+# depth_panel's four tiles per view, in the order it appends them
 PANEL_COLUMNS = ("sparse", "pred", "gt", "error")
 
 

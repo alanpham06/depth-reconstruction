@@ -11,6 +11,8 @@ batch it arrived in.
               network actually had to fill in
 """
 
+from __future__ import annotations
+
 import torch
 
 # The names summarize_metrics returns, in its order: the val/ tags and eval's columns

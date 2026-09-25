@@ -1,5 +1,7 @@
 """train.py — sparse depth in, dense depth out, on the procedural shapes.
 
+(sparse depth, valid mask) -> UNet -> depth - ref -> + ref -> dense depth
+
 The network sees (sparse depth, valid-point mask) and predicts dense depth relative
 to the mean sparse depth; the loss is L1 depth plus a multi-scale gradient-matching
 term, both only on pixels that hit the surface.
@@ -53,6 +55,7 @@ from models.reconstruction_module import (
 from utils.checkpoint import load_payload
 from utils.paths import RESOLVED_CONFIG, SAMPLES, SUMMARY, checkpoint_dir, run_stem
 
+# Lightning's Trainer(precision=...) choices this repo exposes
 PRECISIONS = ("bf16-mixed", "16-mixed", "32-true")
 
 

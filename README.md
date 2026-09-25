@@ -89,8 +89,8 @@ A run writes `runs/<name>/version_N/` (events, `config.json`, `hparams.yaml`, `s
 
 **The Lightning port trains to main's number.** Measured 2026-09-24 with this recipe
 on one capture (256 train and 24 val views per shape), final `val/mae`: main's
-plain loop 0.0050 and 0.0045 (seeds 0 and 1), this branch 0.0052 and 0.0047. The
-fills score identically on both: nearest 0.0179, constant 0.2646.
+plain loop 0.0050 and 0.0045 (seeds 0 and 1), the Lightning port 0.0052 and 0.0047.
+The fills score identically on both: nearest 0.0179, constant 0.2646.
 
 ## Evaluating
 

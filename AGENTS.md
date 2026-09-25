@@ -29,15 +29,23 @@ what predicting the mean sparse depth everywhere scores.
 **The val metrics are pooled over pixels, not averaged over batches.**
 `SparseDepthModule` sums `depth_metrics` over the split and divides once, the way
 `evaluate()` did on main, so `eval.py`'s "all" row reproduces the `val/mae` a
-`best.ckpt` was chosen on. `tests/test_training_run.py` pins that equality.
+`best.ckpt` was chosen on -- for a run trained at 32-true, the precision eval
+always scores at. `tests/test_training_run.py` pins that equality at 32-true.
+Under the shipped bf16-mixed recipe the two differ by precision alone: measured
+0.004993 against a training-logged 0.005201, and 0.004545 against 0.004603, on
+the two equivalence checkpoints; scoring the first under bf16 instead of
+float32 reads 0.005207.
 
 **`--resume` needs the same `--epochs`.** The OneCycle schedule is built from the
 run's length, and `train.check_resume` refuses anything else.
 
 **Paths resolve from the repo root, not from `__file__`'s package.** `utils/paths.py`
-goes up two levels, and every stage takes its locations from there. Getting this
-wrong raises nothing: the capture writes to `render/data`, and nothing reads it.
-`tests/test_repo_layout.py` pins it.
+goes up two levels and anchors `data/` there, so a capture or a training run reads
+and writes the same `data/` regardless of the working directory. `runs/`,
+`checkpoints/` and `output/` are relative to the directory a command runs in, not
+to the repo root; the README's commands all assume that directory is the repo
+root. Getting the repo-root resolution wrong raises nothing: the capture writes to
+`render/data`, and nothing reads it. `tests/test_repo_layout.py` pins it.
 
 **`models/__init__.py`, `models/unet.py`, `datasets/sparse_depth.py` and `utils/{paths,checkpoint}.py` import only
 torch.** The export runs in the `executorch` conda env, which has neither Lightning
@@ -55,8 +63,8 @@ with `EXECUTORCH_BUILD_PORTABLE_OPS=OFF`.
 
 ## Conventions
 
-- Python style: `ruff check .` and `ruff format --check .`, using the shared
-  88-column settings in `ruff.toml`.
+- Python style: `ruff check .` and `ruff format --check .`, using the 88-column
+  settings in `ruff.toml`.
 - One commit, one short sentence, no attribution lines.
 - A claim about a number belongs next to the number that produced it. Keep the
   docstrings that carry measurements true, or delete them.

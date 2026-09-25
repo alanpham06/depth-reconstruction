@@ -46,6 +46,7 @@ from models.losses import completion_loss
 from utils.metrics import PooledMetrics
 from utils.panel import PANEL_COLUMNS, depth_panel
 
+# The keys completion_loss's parts dict returns
 LOSS_TERMS = ("loss", "l1", "grad")
 
 
